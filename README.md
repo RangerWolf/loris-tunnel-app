@@ -5,7 +5,7 @@
 **A desktop GUI application for managing SSH tunnels — with automatic reconnection and a clean interface.**
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-Apache%202.0-green)
 ![Built with Wails](https://img.shields.io/badge/built%20with-Wails-informational)
 
 </div>
@@ -85,10 +85,11 @@ wails build
 
 ## Configuration
 
-Loris Tunnel stores its configuration in a TOML file. By default it is located at:
+Loris Tunnel stores its configuration in a TOML file. Default resolution order:
 
-- **macOS**: `~/Library/Application Support/loris-tunnel/config.toml`
-- **Windows**: `%APPDATA%\loris-tunnel\config.toml`
+- If the current working directory is writable: `./config.toml`
+- Otherwise: `~/.loris-tunnel/config.toml`
+- Override with env var: `LORIS_TUNNEL_CONFIG_PATH`
 
 Example configuration:
 
@@ -135,4 +136,4 @@ remote_port = 5432
 
 ## License
 
-MIT © Loris Tunnel Contributors
+Apache License 2.0.

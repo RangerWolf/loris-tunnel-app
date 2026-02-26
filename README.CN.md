@@ -5,7 +5,7 @@
 **一款桌面 GUI 应用，用于管理 SSH 隧道——支持自动重连，界面简洁易用。**
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-Apache%202.0-green)
 ![Built with Wails](https://img.shields.io/badge/built%20with-Wails-informational)
 
 </div>
@@ -85,10 +85,11 @@ wails build
 
 ## 配置文件
 
-Loris Tunnel 使用 TOML 格式存储配置，默认路径：
+Loris Tunnel 使用 TOML 格式存储配置，默认路径解析顺序：
 
-- **macOS**：`~/Library/Application Support/loris-tunnel/config.toml`
-- **Windows**：`%APPDATA%\loris-tunnel\config.toml`
+- 若当前工作目录可写：`./config.toml`
+- 否则：`~/.loris-tunnel/config.toml`
+- 也可通过环境变量覆盖：`LORIS_TUNNEL_CONFIG_PATH`
 
 配置示例：
 
@@ -135,4 +136,4 @@ remote_port = 5432
 
 ## 开源协议
 
-MIT © Loris Tunnel Contributors
+Apache License 2.0。

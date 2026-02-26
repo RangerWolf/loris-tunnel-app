@@ -50,7 +50,7 @@ type Config struct {
 }
 
 // ResolveConfigPath returns config path from env or default path.
-// On macOS, defaults to ~/.config/loris-tunnel/config.toml to avoid read-only app bundle.
+// Default path follows getDefaultConfigDir() and ends with config.toml.
 func ResolveConfigPath() string {
 	if path := strings.TrimSpace(os.Getenv("LORIS_TUNNEL_CONFIG_PATH")); path != "" {
 		return path
