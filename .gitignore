@@ -1,0 +1,22 @@
+#
+# Build artifacts:
+#   - build/bin/       ignored  (compiled binaries, not for source control)
+#   - build/darwin/    tracked  (Info.plist, app manifests)
+#   - build/windows/   tracked  (icon, manifests)
+#   - build/*.png      tracked  (app icons)
+#
+# The two lines below un-ignore build/ in case a parent .gitignore ignores it
+# (monorepo context). In a standalone repo they are harmless no-ops.
+!build/
+!build/**
+build/bin/
+
+# Node / frontend outputs
+node_modules
+frontend/dist
+frontend/wailsjs
+frontend/package.json.md5
+
+# Local machine / runtime config
+config.toml
+.DS_Store

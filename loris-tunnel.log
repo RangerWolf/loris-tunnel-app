@@ -1,0 +1,12 @@
+time=2026-02-26T23:29:00.672+08:00 level=INFO msg="logger initialized" path=/Users/wenjun/Workspace/github/loris-tunnel-app/loris-tunnel.log level=INFO
+time=2026-02-26T23:29:00.672+08:00 level=INFO msg="app initialized" config=/Users/wenjun/Workspace/github/loris-tunnel-app/config.toml
+time=2026-02-26T23:29:06.178+08:00 level=INFO msg="logger initialized" path=/Users/wenjun/Workspace/github/loris-tunnel-app/loris-tunnel.log level=INFO
+time=2026-02-26T23:29:06.178+08:00 level=INFO msg="app initialized" config=/Users/wenjun/Workspace/github/loris-tunnel-app/config.toml
+time=2026-02-26T23:29:09.903+08:00 level=INFO msg="logger initialized" path=/Users/wenjun/Workspace/github/loris-tunnel-app/loris-tunnel.log level=DEBUG
+time=2026-02-26T23:29:09.903+08:00 level=INFO msg="app initialized" config=/Users/wenjun/Workspace/github/loris-tunnel-app/config.toml
+time=2026-02-26T23:29:10.189+08:00 level=INFO msg="app startup"
+time=2026-02-26T23:32:35.161+08:00 level=INFO msg="tunnel forward start" tunnel_id=1 name=remote-mysql-3306 jumper_hops=1 keepalive_interval_ms=5000 timeout_ms=10000
+time=2026-02-26T23:32:40.309+08:00 level=ERROR msg="tunnel initial dial failed" tunnel_id=1 name=remote-mysql-3306 err="ssh dial my-jumperserver.com:22 failed: ssh: handshake failed: EOF"
+time=2026-02-26T23:32:40.309+08:00 level=ERROR msg="tunnel runtime start failed" tunnel_id=1 name=remote-mysql-3306 err="ssh dial my-jumperserver.com:22 failed: ssh: handshake failed: EOF"
+time=2026-02-26T23:32:40.311+08:00 level=INFO msg="tunnel status updated" tunnel_id=1 name=remote-mysql-3306 status=error error="ssh dial my-jumperserver.com:22 failed: ssh: handshake failed: EOF"
+time=2026-02-26T23:35:08.559+08:00 level=INFO msg="app shutdown"
