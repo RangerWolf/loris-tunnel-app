@@ -59,6 +59,24 @@ Download the latest release from the [Releases](../../releases) page.
 - **macOS**: `.dmg` installer
 - **Windows**: `.exe` installer
 
+### macOS Security Bypass
+
+When running the macOS version for the first time, you may encounter a system security block. Here are two methods to bypass it:
+
+**Method 1: System Settings**
+
+1. When you see the security block popup, click "Cancel"
+2. Open "System Settings" -> "Privacy & Security"
+3. Scroll down to the Security section and click "Open Anyway"
+
+**Method 2: Terminal Command**
+
+Open Terminal and run the following command (you may need to enter your computer password):
+
+```bash
+sudo xattr -rd com.apple.quarantine /Applications/loris-tunnel.app
+```
+
 ### Build from Source
 
 **Prerequisites:**
