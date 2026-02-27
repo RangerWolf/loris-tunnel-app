@@ -93,14 +93,19 @@ jobs:
       - name: Build macOS app
         run: wails build -platform darwin/universal
 
-      # 【步骤 8】打包收尾：把编译出来的软件上传到 GitHub 的后台。
+      # 【步骤 8】创建 DMG 安装包
+      - name: Create DMG Installer
+        run: |
+          cd build/bin
+          hdiutil create -volname "loris-tunnel" -srcfolder "loris-tunnel.app" -ov -format UDZO "loris-tunnel-macos.dmg"
+
+      # 【步骤 9】打包收尾：把编译出来的 DMG 文件上传到 GitHub 的后台。
       # 因为虚拟机用完马上就会被销毁，不上传的话打包出来的东西就全没了。
-      # 注意：Wails 在 macOS 上默认生成二进制文件，不是 .app 包
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: loris-tunnel-macos   # 给传到后台的压缩包起个名字
-          path: build/bin/loris-tunnel*  # 上传二进制文件（loris-tunnel 或 loris-tunnel.exe）
+          name: loris-tunnel-macos
+          path: build/bin/loris-tunnel-macos.dmg
 
   # ----------------------------------------
   # 任务 2：构建 Windows 版本程序
