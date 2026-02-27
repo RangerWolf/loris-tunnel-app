@@ -93,24 +93,31 @@ jobs:
       - name: Build macOS app
         run: wails build -platform darwin/universal
 
-      # 【步骤 8】创建 DMG 安装包
+      # 【步骤 8】安装 create-dmg 工具
+      # 这是一个强大的第三方 DMG 制作工具，支持自定义背景图和精细的布局控制
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      # 【步骤 9】创建 DMG 安装包
+      # 使用 create-dmg 工具进行带背景图的精细化打包
       - name: Create DMG Installer
         run: |
           cd build/bin
           
-          # 1. 创建一个临时的"包装盒"文件夹
-          mkdir -p dmg_staging
-          
-          # 2. 把刚刚编译好的 .app 程序移到这个包装盒里
-          mv loris-tunnel.app dmg_staging/
-          
-          # 3. 核心魔法：在包装盒里创建一个指向系统 Applications 文件夹的快捷方式
-          ln -s /Applications dmg_staging/Applications
-          
-          # 4. 把整个"包装盒"打包成最终的 .dmg 镜像
-          hdiutil create -volname "loris-tunnel" -srcfolder "dmg_staging" -ov -format UDZO "loris-tunnel.dmg"
+          # 调用 create-dmg 工具，下面这些坐标参数就是决定排版的关键
+          create-dmg \
+            --volname "loris-tunnel" \
+            --background "../../dmg-bg.png" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "loris-tunnel.app" 150 190 \
+            --hide-extension "loris-tunnel.app" \
+            --app-drop-link 450 190 \
+            "loris-tunnel.dmg" \
+            "loris-tunnel.app"
 
-      # 【步骤 9】打包收尾：把编译出来的 DMG 文件上传到 GitHub 的后台。
+      # 【步骤 10】打包收尾：把编译出来的 DMG 文件上传到 GitHub 的后台。
       # 因为虚拟机用完马上就会被销毁，不上传的话打包出来的东西就全没了。
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
