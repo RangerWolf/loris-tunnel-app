@@ -6,6 +6,11 @@
 # 随便起，一般叫 "Build" 或 "CI/CD"。
 name: Build
 
+# 设置 GITHUB_TOKEN 的权限，允许创建 Release
+permissions:
+  contents: write  # 写入权限：创建 release、上传文件
+  actions: read    # 读取权限：下载 artifacts
+
 # `on` 是触发器（Trigger）。它决定了“什么时候”去执行下面配置的那些任务。
 on:
   # `push` 意味着当有代码被推送到 GitHub 仓库时触发。
