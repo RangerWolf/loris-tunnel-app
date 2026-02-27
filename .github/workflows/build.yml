@@ -1,49 +1,107 @@
+# ==========================================
+# 第一部分：工作流的基本信息
+# ==========================================
+
+# 这个名字会显示在你的 GitHub 仓库的 "Actions" 网页标签下。
+# 随便起，一般叫 "Build" 或 "CI/CD"。
 name: Build
 
+# `on` 是触发器（Trigger）。它决定了“什么时候”去执行下面配置的那些任务。
 on:
+  # `push` 意味着当有代码被推送到 GitHub 仓库时触发。
   push:
-    branches: [main, master]
+    # 进一步限制：只有推送到下面这几个分支时，才触发这个工作流。
+    # 比如你推送到一个叫 "test-bug" 的分支，就不会触发，节省资源。
+    branches:
+      - main
+      - master
+      - release/* # 这里的 * 是通配符，代表匹配所有以 release/ 开头的分支，比如 release/v1.0
+    
+    # 进一步限制：除了指定分支，如果你推送了版本标签（Tag），也会触发。
+    # 程序员发版时通常会打个标签，比如 `git tag v1.0.0` 然后 `git push --tags`。
     tags:
-      - "v*"
-  pull_request:
-    branches: [main, master]
+      - "v*"       # 匹配所有以 v 开头的标签，比如 v1.0.0, v2.1.3 等。
+
+  # `workflow_dispatch` 是一个非常实用的开关。
+  # 加上这行之后，你的 GitHub Actions 页面会多出一个 "Run workflow" 的按钮，
+  # 允许你哪怕不推送代码，也能随时手动点击按钮来强行运行一次打包。
   workflow_dispatch:
 
+
+# ==========================================
+# 第二部分：具体要执行的任务（Jobs）
+# ==========================================
+
+# `jobs` 里面定义了具体要干什么活儿。
+# 默认情况下，这里面定义的多个任务（比如 build-macos 和 build-windows）是“同时并行”开始的。
 jobs:
+
+  # ----------------------------------------
+  # 任务 1：构建 macOS 版本程序
+  # ----------------------------------------
   build-macos:
+    # `runs-on` 指定这个任务运行在什么操作系统的云端服务器上。
+    # `macos-latest` 表示由 GitHub 提供一台最新版的苹果 Mac 虚拟机。
     runs-on: macos-latest
+    
+    # `steps` 是这个任务的具体执行步骤，必须按顺序一步步来。
     steps:
+      # 【步骤 1】拉取代码：把你的项目代码从 GitHub 克隆到这台 Mac 虚拟机里。
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 【步骤 2】安装 Go 语言环境（根据你本地环境同步为 1.26）。
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.26" # 保持与你本地一致的 Go 版本
+          cache: true        # 魔法开启：自动缓存下载过的 Go 依赖包，下次运行大幅提速！
 
+      # 【步骤 3】安装 Node.js 环境（Wails 的前端需要，同步为 24）。
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24" # 保持与你本地一致的 Node 版本
 
+      # 【步骤 4】安装 pnpm 前端包管理器（同步为 10）。
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10        # 保持与你本地一致的 pnpm 版本
 
+      # 【步骤 5】提速魔法：尝试从云端缓存里找以前编译好的 Wails 命令行工具。
+      - name: Cache Wails CLI
+        id: cache-wails      # 给这步起个 ID，方便下一步获取它的结果
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/wails                  # 去这个路径下找缓存文件
+          key: ${{ runner.os }}-wails-cli-v2.11.0 # 缓存的唯一名字，包含系统名字防止冲突
+
+      # 【步骤 6】安装 Wails 命令行工具。
+      # `if` 判断：如果上一步的缓存魔法没有命中（比如第一次运行，或者缓存过期），才真正执行安装。
       - name: Install Wails
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        if: steps.cache-wails.outputs.cache-hit != 'true'
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
 
+      # 【步骤 7】核心构建：使用 Wails 把你的 Go + 前端代码编译成 macOS 的 .app 程序。
+      # darwin/universal 表示打包出的程序同时支持 Intel 和 M1/M2/M3/M4 芯片。
       - name: Build macOS app
         run: wails build -platform darwin/universal
 
+      # 【步骤 8】打包收尾：把编译出来的 .app 软件上传到 GitHub 的后台。
+      # 因为虚拟机用完马上就会被销毁，不上传的话打包出来的东西就全没了。
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: loris-tunnel-macos
-          path: build/bin/*.app
+          name: loris-tunnel-macos   # 给传到后台的压缩包起个名字
+          path: build/bin/*.app      # 告诉它你要上传哪些文件（打包好的 .app）
 
+  # ----------------------------------------
+  # 任务 2：构建 Windows 版本程序
+  # （逻辑和 macOS 一模一样，只是环境变成了 Windows）
+  # ----------------------------------------
   build-windows:
+    # 换成 Windows 最新版虚拟机
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -52,52 +110,81 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.26"
+          cache: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
+
+      # Windows 下去找缓存的路径斜杠方向不同，且最后是 wails.exe
+      - name: Cache Wails CLI
+        id: cache-wails
+        uses: actions/cache@v4
+        with:
+          path: ~\go\bin\wails.exe
+          key: ${{ runner.os }}-wails-cli-v2
 
       - name: Install Wails
+        if: steps.cache-wails.outputs.cache-hit != 'true'
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
+      # 编译出 Windows 64 位程序
       - name: Build Windows app
         run: wails build -platform windows/amd64
 
+      # 上传后缀为 .exe 的文件到后台
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: loris-tunnel-windows
           path: build/bin/*.exe
 
+
+  # ----------------------------------------
+  # 任务 3：自动发布 Release 版本
+  # ----------------------------------------
   release:
+    # `needs` 非常关键：它告诉 GitHub，这个任务必须等 build-macos 和 build-windows 都成功干完活，才能开始。
     needs: [build-macos, build-windows]
+    
+    # 发布任务不耗性能，用最便宜、启动最快的 Ubuntu Linux 就行
     runs-on: ubuntu-latest
+    
+    # `if` 拦截器：只有当触发本次工作流的是一个以 "v" 开头的 Tag (比如 v1.0.0) 时，才执行发布。
+    # 也就是说，平时只 push 代码的话，前面两个 build 任务跑完就结束了，这一步会被自动跳过。
     if: startsWith(github.ref, 'refs/tags/v')
+    
     steps:
+      # 【步骤 1】从刚才的 build-macos 任务的后台存档里，把打包好的苹果软件下载过来。
       - name: Download macOS artifact
         uses: actions/download-artifact@v4
         with:
           name: loris-tunnel-macos
-          path: artifacts/macos
+          path: artifacts/macos      # 下载后放到当前服务器的这个文件夹里
 
+      # 【步骤 2】把 Windows 软件也下载过来。
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
           name: loris-tunnel-windows
           path: artifacts/windows
 
+      # 【步骤 3】终极步骤：调用 GitHub 官方提供的发布插件，自动创建一个 Release 发布页。
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          # 把刚才下载到 artifacts 文件夹里的所有文件，统统作为附件上传到 Release 页面
           files: artifacts/**/*
-          draft: false
-          prerelease: false
+          draft: false           # false 表示直接发布，不存草稿
+          prerelease: false      # false 表示这是正式版，不是预发布版
         env:
+          # 给这个插件发一张“通行证”，证明它有权限在你的仓库里创建 Release。
+          # GITHUB_TOKEN 是 GitHub Actions 自动生成并提供给你的，直接用就行。
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
