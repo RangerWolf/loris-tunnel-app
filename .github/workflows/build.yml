@@ -97,7 +97,7 @@ jobs:
       - name: Create DMG Installer
         run: |
           cd build/bin
-          hdiutil create -volname "loris-tunnel" -srcfolder "loris-tunnel.app" -ov -format UDZO "loris-tunnel-macos.dmg"
+          hdiutil create -volname "loris-tunnel" -srcfolder "loris-tunnel.app" -ov -format UDZO "loris-tunnel.dmg"
 
       # 【步骤 9】打包收尾：把编译出来的 DMG 文件上传到 GitHub 的后台。
       # 因为虚拟机用完马上就会被销毁，不上传的话打包出来的东西就全没了。
@@ -105,7 +105,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: loris-tunnel-macos
-          path: build/bin/loris-tunnel-macos.dmg
+          path: build/bin/loris-tunnel.dmg
 
   # ----------------------------------------
   # 任务 2：构建 Windows 版本程序
