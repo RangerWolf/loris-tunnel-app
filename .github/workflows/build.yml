@@ -111,9 +111,9 @@ jobs:
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 100 \
-            --icon "loris-tunnel.app" 120 170 \
+            --icon "loris-tunnel.app" 110 200 \
             --hide-extension "loris-tunnel.app" \
-            --app-drop-link 480 170 \
+            --app-drop-link 490 200 \
             "loris-tunnel.dmg" \
             "loris-tunnel.app"
 
