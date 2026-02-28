@@ -256,6 +256,7 @@
         "build": "Build",
         "updateProduct": "Update & Product",
         "checkUpdates": "Check for Updates",
+        "openReleases": "Open Releases Page",
         "upgradePro": "Upgrade to Pro",
         "proExpires": "Pro expires on {date}",
         "manageLicense": "Manage License (Soon)"

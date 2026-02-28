@@ -22,10 +22,14 @@ const props = defineProps({
   configMessage: {
     type: String,
     default: ''
+  },
+  showReleasePageButton: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['theme-change', 'check-updates', 'upgrade'])
+defineEmits(['theme-change', 'check-updates', 'upgrade', 'open-release-page'])
 
 const { t, locale } = useI18n()
 
@@ -106,6 +110,14 @@ watch(locale, (newLocale) => {
           <div class="d-flex flex-wrap gap-2">
             <button type="button" class="btn btn-outline-secondary" @click="$emit('check-updates')">
               {{ t('config.checkUpdates') }}
+            </button>
+            <button
+              v-if="showReleasePageButton"
+              type="button"
+              class="btn btn-outline-primary"
+              @click="$emit('open-release-page')"
+            >
+              {{ t('config.openReleases') }}
             </button>
             <button v-if="!isPro" type="button" class="btn btn-primary" @click="$emit('upgrade')">{{ t('config.upgradePro') }}</button>
             <span v-else class="pro-expiry-chip" :title="t('config.proExpires', { date: proExpiryLabel })">

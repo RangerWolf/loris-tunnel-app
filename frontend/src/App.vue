@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  CheckForUpdates as CheckForUpdatesAPI,
   CreateJumper,
   CreateTunnel,
   DeleteJumper,
@@ -14,7 +15,7 @@ import {
   UpdateJumper,
   UpdateTunnel
 } from '../wailsjs/go/main/App'
-import { BrowserOpenURL, Environment } from '../wailsjs/runtime/runtime'
+import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import AppTopHeader from './components/layout/AppTopHeader.vue'
 import OverviewPage from './components/pages/OverviewPage.vue'
@@ -25,7 +26,7 @@ import ConfigPage from './components/pages/ConfigPage.vue'
 import JumperModal from './components/modals/JumperModal.vue'
 import TunnelModal from './components/modals/TunnelModal.vue'
 import ImportTunnelModal from './components/modals/ImportTunnelModal.vue'
-import { BACKEND_API_BASE_URL, checkUpdate, getLicenseStatus, redeemLicenseCode } from './utils/backend-api'
+import { getLicenseStatus, redeemLicenseCode } from './utils/backend-api'
 import './styles/app-shell.css'
 
 const { t, locale } = useI18n()
@@ -55,13 +56,16 @@ const theme = ref(savedTheme === 'dark' ? 'dark' : 'light')
 const activePage = ref('overview')
 const selectedLogLevel = ref('all')
 const configMessage = ref('')
+const showReleasePageButton = ref(false)
+const DEFAULT_RELEASES_PAGE_URL = 'https://github.com/RangerWolf/loris-tunnel-app/releases'
+const releasePageUrl = ref(DEFAULT_RELEASES_PAGE_URL)
 const showOverviewActive = ref(true)
 const showOverviewActivity = ref(true)
 
 const appMeta = reactive({
-  version: '0.15.2-alpha',
+  version: '0.15.13-alpha',
   channel: 'Community',
-  updater: `Backend API (${BACKEND_API_BASE_URL})`,
+  updater: 'GitHub Releases API (via Go backend)',
   build: '2026-02-25'
 })
 const proLicense = reactive({
@@ -270,37 +274,6 @@ async function ensureMachineId() {
   }
   machineId.value = id
   return id
-}
-
-function normalizeOs(raw) {
-  const value = String(raw || '').toLowerCase()
-  if (value.includes('darwin') || value.includes('mac')) return 'mac'
-  if (value.includes('win')) return 'windows'
-  if (value.includes('linux')) return 'linux'
-  return 'mac'
-}
-
-function normalizeArch(raw) {
-  const value = String(raw || '').toLowerCase()
-  if (value.includes('arm64') || value.includes('aarch64')) return 'arm64'
-  if (value.includes('amd64') || value.includes('x86_64') || value.includes('x64')) return 'amd64'
-  return 'amd64'
-}
-
-async function getRuntimeTarget() {
-  try {
-    const env = await Environment()
-    return {
-      os: normalizeOs(env?.platform),
-      arch: normalizeArch(env?.arch)
-    }
-  } catch (_) {
-    const platform = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-    return {
-      os: normalizeOs(platform),
-      arch: normalizeArch(platform)
-    }
-  }
 }
 
 function formatDateTime(value) {
@@ -515,37 +488,34 @@ async function refreshLicenseStatus(options = {}) {
 
 async function checkForUpdates() {
   try {
-    const target = await getRuntimeTarget()
-    const result = await checkUpdate({
-      current_version: appMeta.version,
-      os: target.os,
-      arch: target.arch
-    })
+    const result = await CheckForUpdatesAPI(appMeta.version)
 
-    if (!result?.has_update) {
+    if (!result?.hasUpdate) {
+      showReleasePageButton.value = false
+      releasePageUrl.value = DEFAULT_RELEASES_PAGE_URL
       configMessage.value = `Checked at ${nowLabel()}. Current version (${appMeta.version}) is up to date.`
-      logEvent('info', `No updates available for ${target.os}/${target.arch}`)
+      logEvent('info', 'No updates available')
       return
     }
 
-    const forceText = result.force_update ? ' [Force Update]' : ''
-    configMessage.value = `New version ${result.latest_version} available.${forceText}`
-    logEvent('info', `Update found: ${result.latest_version}${forceText}`)
-    if (result.release_notes) {
-      logEvent('info', `Release notes: ${result.release_notes}`)
-    }
-
-    if (result.download_url && typeof window !== 'undefined') {
-      const shouldOpen = window.confirm('Detected a new version. Open download page now?')
-      if (shouldOpen) {
-        openExternalUrl(result.download_url)
-      }
+    showReleasePageButton.value = true
+    releasePageUrl.value = String(result.releasePageUrl || DEFAULT_RELEASES_PAGE_URL).trim() || DEFAULT_RELEASES_PAGE_URL
+    configMessage.value = `New version ${result.latestVersion} available.`
+    logEvent('info', `Update found: ${result.latestVersion}`)
+    if (result.releaseNotes) {
+      logEvent('info', `Release notes: ${result.releaseNotes}`)
     }
   } catch (err) {
-    const message = errorMessage(err, 'Failed to check updates from backend API.')
+    showReleasePageButton.value = false
+    releasePageUrl.value = DEFAULT_RELEASES_PAGE_URL
+    const message = errorMessage(err, 'Failed to check updates from GitHub Releases API.')
     configMessage.value = message
     logEvent('error', message)
   }
+}
+
+function openReleasePage() {
+  openExternalUrl(releasePageUrl.value || DEFAULT_RELEASES_PAGE_URL)
 }
 
 async function openProUpgrade() {
@@ -1396,8 +1366,10 @@ watch(
           :is-pro="isPro"
           :pro-expiry-label="proExpiryLabel"
           :config-message="configMessage"
+          :show-release-page-button="showReleasePageButton"
           @theme-change="setThemeBySwitch"
           @check-updates="checkForUpdates"
+          @open-release-page="openReleasePage"
           @upgrade="openProUpgrade"
         />
       </main>

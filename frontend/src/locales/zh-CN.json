@@ -256,6 +256,7 @@
         "build": "构建",
         "updateProduct": "更新与产品",
         "checkUpdates": "检查更新",
+        "openReleases": "打开 Releases 页面",
         "upgradePro": "升级到 Pro",
         "proExpires": "Pro 到期于 {date}",
         "manageLicense": "管理授权 (即将来临)"

@@ -12,6 +12,7 @@ import (
 	"loris-tunnel/internal/conf"
 	"loris-tunnel/internal/device"
 	"loris-tunnel/internal/model"
+	"loris-tunnel/internal/updater"
 )
 
 // App struct
@@ -20,6 +21,7 @@ type App struct {
 	storage   *conf.Storage
 	jumper    *biz.JumperBiz
 	tunnel    *biz.TunnelBiz
+	updater   *updater.Service
 	machineID string
 	initErr   error
 }
@@ -40,6 +42,7 @@ func NewApp() *App {
 		storage:   storage,
 		jumper:    biz.NewJumperBiz(storage),
 		tunnel:    biz.NewTunnelBiz(storage),
+		updater:   updater.NewDefaultService(),
 		machineID: device.MachineID(),
 	}
 }
@@ -235,4 +238,14 @@ func (a *App) GetMachineID() (string, error) {
 		a.machineID = device.MachineID()
 	}
 	return a.machineID, nil
+}
+
+func (a *App) CheckForUpdates(currentVersion string) (updater.Result, error) {
+	if err := a.ensureReady(); err != nil {
+		return updater.Result{}, err
+	}
+	if a.updater == nil {
+		return updater.Result{}, fmt.Errorf("updater service is not initialized")
+	}
+	return a.updater.Check(context.Background(), currentVersion)
 }
