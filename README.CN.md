@@ -2,6 +2,8 @@
 
 <div align="center">
 
+[English](README.md)
+
 **一款桌面 GUI 应用，用于管理 SSH 隧道——支持自动重连，界面简洁易用。**
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)

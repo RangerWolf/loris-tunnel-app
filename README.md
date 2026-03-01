@@ -2,6 +2,8 @@
 
 <div align="center">
 
+[简体中文](README.CN.md)
+
 **A desktop GUI application for managing SSH tunnels — with automatic reconnection and a clean interface.**
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
