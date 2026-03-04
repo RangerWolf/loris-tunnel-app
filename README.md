@@ -154,6 +154,14 @@ remote_port = 5432
 
 ---
 
+## Community
+
+Join our QQ group for discussions, support, and updates:
+
+- 💬 **QQ Group**: **1009737419**
+
+---
+
 ## License
 
 Apache License 2.0.
