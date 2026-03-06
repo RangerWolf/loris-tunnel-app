@@ -244,11 +244,15 @@
         }
     },
     "config": {
-        "appearance": "外观",
+        "general": "通用",
         "language": "语言",
         "languageDesc": "选择偏好语言 / Choose your preferred language",
         "theme": "深色主题",
         "themeDesc": "切换明暗主题",
+        "autoRun": "随系统启动",
+        "autoRunDesc": "登录时自动启动 Loris Tunnel（仅 Pro）",
+        "autoRunProRequired": "随系统启动为 Pro 功能，请升级后使用。",
+        "autoRunExpiredDisabled": "您已开启随系统启动，但当前未升级或授权已过期，已为您关闭该功能。请升级后重新开启。",
         "appInfo": "应用信息",
         "version": "版本",
         "channel": "通道",

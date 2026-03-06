@@ -1,6 +1,7 @@
 <script setup>
-import { watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { GetAutoRunEnabled, SetAutoRunEnabled } from '../../../wailsjs/go/main/App'
 
 const props = defineProps({
   theme: {
@@ -29,9 +30,32 @@ const props = defineProps({
   }
 })
 
-defineEmits(['theme-change', 'check-updates', 'upgrade', 'open-release-page'])
+const emit = defineEmits(['theme-change', 'check-updates', 'upgrade', 'open-release-page', 'set-config-message'])
 
 const { t, locale } = useI18n()
+const autoRunEnabled = ref(false)
+
+onMounted(async () => {
+  try {
+    autoRunEnabled.value = await GetAutoRunEnabled()
+  } catch (_) {
+    autoRunEnabled.value = false
+  }
+})
+
+async function onAutoRunChange(checked) {
+  if (checked && !props.isPro) {
+    emit('set-config-message', t('config.autoRunProRequired'))
+    emit('upgrade')
+    return
+  }
+  try {
+    await SetAutoRunEnabled(!!checked)
+    autoRunEnabled.value = !!checked
+  } catch (_) {
+    autoRunEnabled.value = !checked
+  }
+}
 
 watch(locale, (newLocale) => {
   localStorage.setItem('loris-tunnel.locale', newLocale)
@@ -44,9 +68,9 @@ watch(locale, (newLocale) => {
       <div class="col-12 col-xl-6">
         <div class="panel-card config-card">
           <div class="panel-head mb-2">
-            <h2 class="panel-title mb-0">{{ t('config.appearance') }}</h2>
+            <h2 class="panel-title mb-0">{{ t('config.general') }}</h2>
           </div>
-          
+
           <div class="config-row">
             <div>
               <div class="config-name">{{ t('config.language') }}</div>
@@ -72,6 +96,22 @@ watch(locale, (newLocale) => {
                 type="checkbox"
                 :checked="theme === 'dark'"
                 @change="$emit('theme-change', $event.target.checked)"
+              />
+            </div>
+          </div>
+
+          <div class="config-row">
+            <div>
+              <div class="config-name">{{ t('config.autoRun') }}</div>
+              <div class="config-desc">{{ t('config.autoRunDesc') }}</div>
+            </div>
+            <div class="form-check form-switch m-0">
+              <input
+                id="autoRunSwitch"
+                class="form-check-input"
+                type="checkbox"
+                :checked="autoRunEnabled"
+                @change="onAutoRunChange($event.target.checked)"
               />
             </div>
           </div>

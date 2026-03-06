@@ -7,8 +7,10 @@ import {
   CreateTunnel,
   DeleteJumper,
   DeleteTunnel,
+  GetAutoRunEnabled,
   GetMachineID,
   GetState,
+  SetAutoRunEnabled,
   TestJumperConnection as TestJumperConnectionAPI,
   TestTunnelConnection as TestTunnelConnectionAPI,
   ToggleTunnel,
@@ -63,7 +65,7 @@ const showOverviewActive = ref(true)
 const showOverviewActivity = ref(true)
 
 const appMeta = reactive({
-  version: '0.15.13-alpha',
+  version: '0.17.1-alpha',
   channel: 'Community',
   updater: 'GitHub Releases API (via Go backend)',
   build: '2026-02-25'
@@ -460,6 +462,10 @@ function switchPage(pageKey) {
 function setThemeBySwitch(enabled) {
   theme.value = enabled ? 'dark' : 'light'
   logEvent('info', `Theme switched to ${theme.value}`)
+}
+
+function setConfigMessage(msg) {
+  configMessage.value = msg || ''
 }
 
 async function refreshLicenseStatus(options = {}) {
@@ -1262,6 +1268,16 @@ function deleteJumper(jumper) {
 onMounted(async () => {
   await loadStateFromBackend()
   await refreshLicenseStatus({ silent: true })
+  // If launch at login is on but user is not Pro or expired, disable it and show upgrade prompt
+  try {
+    const autoRunEnabled = await GetAutoRunEnabled()
+    if (autoRunEnabled && !proLicense.isPro) {
+      configMessage.value = t('config.autoRunExpiredDisabled')
+      await SetAutoRunEnabled(false)
+    }
+  } catch (err) {
+    logEvent('error', errorMessage(err, 'Failed to check or reset launch-at-login (AutoRun).'))
+  }
   stateSyncTimer = window.setInterval(syncStateSilently, STATE_SYNC_INTERVAL_MS)
 })
 
@@ -1371,6 +1387,7 @@ watch(
           @check-updates="checkForUpdates"
           @open-release-page="openReleasePage"
           @upgrade="openProUpgrade"
+          @set-config-message="setConfigMessage"
         />
       </main>
     </section>

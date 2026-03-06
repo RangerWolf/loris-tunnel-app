@@ -44,9 +44,10 @@ func getDefaultConfigDir() string {
 
 // Config is persisted in TOML storage.
 type Config struct {
-	Version int            `toml:"version"`
-	Jumpers []model.Jumper `toml:"jumpers"`
-	Tunnels []model.Tunnel `toml:"tunnels"`
+	Version       int            `toml:"version"`
+	Jumpers       []model.Jumper `toml:"jumpers"`
+	Tunnels       []model.Tunnel `toml:"tunnels"`
+	AutoRun       bool           `toml:"auto_run"`
 }
 
 // ResolveConfigPath returns config path from env or default path.
@@ -61,9 +62,10 @@ func ResolveConfigPath() string {
 // DefaultConfig creates an empty config.
 func DefaultConfig() *Config {
 	return &Config{
-		Version: currentConfigVersion,
-		Jumpers: []model.Jumper{},
-		Tunnels: []model.Tunnel{},
+		Version:       currentConfigVersion,
+		Jumpers:       []model.Jumper{},
+		Tunnels:       []model.Tunnel{},
+		AutoRun:       false,
 	}
 }
 
@@ -73,7 +75,7 @@ func (c *Config) Clone() *Config {
 		return DefaultConfig()
 	}
 
-	out := &Config{Version: c.Version}
+	out := &Config{Version: c.Version, AutoRun: c.AutoRun}
 	out.Jumpers = append(out.Jumpers, c.Jumpers...)
 	out.Tunnels = append(out.Tunnels, c.Tunnels...)
 	return out
@@ -90,6 +92,7 @@ func (c *Config) Normalize() {
 	if c.Tunnels == nil {
 		c.Tunnels = []model.Tunnel{}
 	}
+	// AutoRun defaults to false; no need to set if already present
 	for i := range c.Tunnels {
 		c.Tunnels[i].JumperIDs = normalizeJumperIDs(c.Tunnels[i].JumperIDs)
 	}

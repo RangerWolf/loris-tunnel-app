@@ -4,6 +4,7 @@ go 1.23
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/emersion/go-autostart v0.0.0-20250403115856-34830d6457d2
 	github.com/wailsapp/wails/v2 v2.11.0
 	golang.org/x/crypto v0.33.0
 	golang.org/x/sys v0.30.0

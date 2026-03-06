@@ -244,11 +244,15 @@
         }
     },
     "config": {
-        "appearance": "Appearance",
+        "general": "General",
         "language": "Language",
         "languageDesc": "Choose your preferred language / 选择偏好语言",
         "theme": "Dark Theme",
         "themeDesc": "Switch dark/light theme",
+        "autoRun": "Launch at login",
+        "autoRunDesc": "Start Loris Tunnel when you log in (Pro only)",
+        "autoRunProRequired": "Launch at login is a Pro feature. Please upgrade to enable.",
+        "autoRunExpiredDisabled": "Launch at login was enabled but your license has expired or is inactive. It has been disabled. Upgrade to re-enable.",
         "appInfo": "App Info",
         "version": "Version",
         "channel": "Channel",

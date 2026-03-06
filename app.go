@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"loris-tunnel/internal/autostart"
 	"loris-tunnel/internal/biz"
 	"loris-tunnel/internal/conf"
 	"loris-tunnel/internal/device"
@@ -102,6 +103,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	slog.Info("app startup")
 	if err := a.ensureReady(); err == nil {
+		a.syncAutoRunWithConfig()
 		_ = a.tunnel.StartAutoStart()
 	}
 }
@@ -248,4 +250,45 @@ func (a *App) CheckForUpdates(currentVersion string) (updater.Result, error) {
 		return updater.Result{}, fmt.Errorf("updater service is not initialized")
 	}
 	return a.updater.Check(context.Background(), currentVersion)
+}
+
+// syncAutoRunWithConfig aligns OS auto-run (launch at login) state with config.
+// Called from startup before frontend runs; frontend will later check Pro and may call SetAutoRunEnabled(false).
+func (a *App) syncAutoRunWithConfig() {
+	cfg, err := a.storage.Load()
+	if err != nil {
+		return
+	}
+	enabled, _ := autostart.IsEnabled()
+	if cfg.AutoRun && !enabled {
+		_ = autostart.Enable()
+	} else if !cfg.AutoRun && enabled {
+		_ = autostart.Disable()
+	}
+}
+
+// GetAutoRunEnabled returns whether the app is currently set to launch at login (system state).
+func (a *App) GetAutoRunEnabled() (bool, error) {
+	if err := a.ensureReady(); err != nil {
+		return false, err
+	}
+	return autostart.IsEnabled()
+}
+
+// SetAutoRunEnabled enables or disables launch at login and persists to config.
+func (a *App) SetAutoRunEnabled(enabled bool) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	_, err := a.storage.Update(func(cfg *conf.Config) error {
+		cfg.AutoRun = enabled
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if enabled {
+		return autostart.Enable()
+	}
+	return autostart.Disable()
 }
