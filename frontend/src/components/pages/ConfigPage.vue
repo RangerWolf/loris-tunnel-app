@@ -20,6 +20,10 @@ const props = defineProps({
     type: String,
     required: true
   },
+  licenseCode: {
+    type: String,
+    default: ''
+  },
   configMessage: {
     type: String,
     default: ''
@@ -167,6 +171,7 @@ watch(locale, (newLocale) => {
               {{ t('config.manageLicense') }}
             </button>
           </div>
+          <p v-if="licenseCode" class="config-message mb-0 mt-2">{{ t('config.licenseCode') }}: {{ licenseCode }}</p>
           <p v-if="configMessage" class="config-message mb-0 mt-3">{{ configMessage }}</p>
         </div>
       </div>

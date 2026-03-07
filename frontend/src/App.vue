@@ -8,8 +8,10 @@ import {
   DeleteJumper,
   DeleteTunnel,
   GetAutoRunEnabled,
-  GetMachineID,
+  GetLicenseStatus as GetLicenseStatusAPI,
+  GetStoredLicenseCode,
   GetState,
+  RedeemLicenseCode as RedeemLicenseCodeAPI,
   SetAutoRunEnabled,
   TestJumperConnection as TestJumperConnectionAPI,
   TestTunnelConnection as TestTunnelConnectionAPI,
@@ -28,7 +30,6 @@ import ConfigPage from './components/pages/ConfigPage.vue'
 import JumperModal from './components/modals/JumperModal.vue'
 import TunnelModal from './components/modals/TunnelModal.vue'
 import ImportTunnelModal from './components/modals/ImportTunnelModal.vue'
-import { getLicenseStatus, redeemLicenseCode } from './utils/backend-api'
 import './styles/app-shell.css'
 
 const { t, locale } = useI18n()
@@ -65,18 +66,18 @@ const showOverviewActive = ref(true)
 const showOverviewActivity = ref(true)
 
 const appMeta = reactive({
-  version: '0.17.1-alpha',
+  version: '0.17.2-alpha',
   channel: 'Community',
   updater: 'GitHub Releases API (via Go backend)',
-  build: '2026-02-25'
+  build: '2026-03-07'
 })
 const proLicense = reactive({
   isPro: false,
   expiresAt: '',
-  isLifetime: false
+  isLifetime: false,
+  code: ''
 })
 const LIFETIME_DURATION_DAYS = 36500
-const machineId = ref('')
 
 watchEffect(() => {
   if (typeof document !== 'undefined') {
@@ -268,16 +269,6 @@ function nowLabel() {
   return new Date().toLocaleString()
 }
 
-async function ensureMachineId() {
-  if (machineId.value) return machineId.value
-  const id = String(await GetMachineID() || '').trim()
-  if (!id) {
-    throw new Error('Failed to get machine ID from Wails backend.')
-  }
-  machineId.value = id
-  return id
-}
-
 function formatDateTime(value) {
   if (!value) return '--'
   const date = new Date(value)
@@ -285,10 +276,11 @@ function formatDateTime(value) {
   return date.toLocaleDateString()
 }
 
-function applyLicenseState({ active = false, expire_time = null, is_lifetime = false }) {
+function applyLicenseState({ active = false, expire_time = null, is_lifetime = false, code = '' }) {
   proLicense.isPro = !!active
   proLicense.expiresAt = expire_time ? String(expire_time) : ''
   proLicense.isLifetime = !!is_lifetime
+  proLicense.code = code ? String(code) : ''
   appMeta.channel = proLicense.isPro ? 'Pro' : 'Community'
 }
 
@@ -471,8 +463,7 @@ function setConfigMessage(msg) {
 async function refreshLicenseStatus(options = {}) {
   const { silent = false } = options
   try {
-    const id = await ensureMachineId()
-    const status = await getLicenseStatus(id)
+    const status = await GetLicenseStatusAPI()
     applyLicenseState(status || {})
     if (!silent) {
       if (proLicense.isPro) {
@@ -483,12 +474,23 @@ async function refreshLicenseStatus(options = {}) {
         logEvent('info', 'License status refreshed: inactive')
       }
     }
+    return true
   } catch (err) {
     if (!silent) {
-      const message = errorMessage(err, 'Failed to query license status from backend API.')
+      const message = errorMessage(err, 'Failed to query license status from Wails backend.')
       configMessage.value = message
       logEvent('error', message)
     }
+    return false
+  }
+}
+
+async function loadStoredLicenseCode() {
+  try {
+    const code = String(await GetStoredLicenseCode() || '').trim()
+    if (code) proLicense.code = code
+  } catch (_) {
+    // local display cache is optional
   }
 }
 
@@ -1201,12 +1203,12 @@ async function submitRedeemDialog() {
   redeemDialog.error = ''
   redeemDialog.submitting = true
   try {
-    const id = await ensureMachineId()
-    const redeemResult = await redeemLicenseCode({ code, machineId: id })
+    const redeemResult = await RedeemLicenseCodeAPI(code)
     applyLicenseState({
       active: redeemResult?.active,
       expire_time: redeemResult?.expire_time,
-      is_lifetime: redeemResult?.added_days >= LIFETIME_DURATION_DAYS
+      is_lifetime: redeemResult?.added_days >= LIFETIME_DURATION_DAYS,
+      code: redeemResult?.code || code
     })
     configMessage.value = `${redeemResult?.message || 'License redeemed.'} (${proExpiryLabel.value})`
     logEvent('info', `License redeemed successfully (${proExpiryLabel.value})`)
@@ -1267,11 +1269,12 @@ function deleteJumper(jumper) {
 
 onMounted(async () => {
   await loadStateFromBackend()
-  await refreshLicenseStatus({ silent: true })
+  await loadStoredLicenseCode()
+  const licenseStatusReady = await refreshLicenseStatus({ silent: true })
   // If launch at login is on but user is not Pro or expired, disable it and show upgrade prompt
   try {
     const autoRunEnabled = await GetAutoRunEnabled()
-    if (autoRunEnabled && !proLicense.isPro) {
+    if (licenseStatusReady && autoRunEnabled && !proLicense.isPro) {
       configMessage.value = t('config.autoRunExpiredDisabled')
       await SetAutoRunEnabled(false)
     }
@@ -1381,6 +1384,7 @@ watch(
           :app-meta="appMeta"
           :is-pro="isPro"
           :pro-expiry-label="proExpiryLabel"
+          :license-code="proLicense.code"
           :config-message="configMessage"
           :show-release-page-button="showReleasePageButton"
           @theme-change="setThemeBySwitch"

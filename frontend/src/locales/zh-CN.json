@@ -263,6 +263,7 @@
         "openReleases": "打开 Releases 页面",
         "upgradePro": "升级到 Pro",
         "proExpires": "Pro 到期于 {date}",
-        "manageLicense": "管理授权 (即将来临)"
+        "manageLicense": "管理授权 (即将来临)",
+        "licenseCode": "注册码"
     }
 }

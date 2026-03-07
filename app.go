@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"loris-tunnel/internal/autostart"
 	"loris-tunnel/internal/biz"
 	"loris-tunnel/internal/conf"
 	"loris-tunnel/internal/device"
+	"loris-tunnel/internal/license"
 	"loris-tunnel/internal/model"
 	"loris-tunnel/internal/updater"
 )
@@ -23,6 +25,7 @@ type App struct {
 	jumper    *biz.JumperBiz
 	tunnel    *biz.TunnelBiz
 	updater   *updater.Service
+	license   *license.Client
 	machineID string
 	initErr   error
 }
@@ -44,6 +47,7 @@ func NewApp() *App {
 		jumper:    biz.NewJumperBiz(storage),
 		tunnel:    biz.NewTunnelBiz(storage),
 		updater:   updater.NewDefaultService(),
+		license:   license.NewDefaultClient(),
 		machineID: device.MachineID(),
 	}
 }
@@ -242,6 +246,67 @@ func (a *App) GetMachineID() (string, error) {
 	return a.machineID, nil
 }
 
+func (a *App) GetStoredLicenseCode() (string, error) {
+	if err := a.ensureReady(); err != nil {
+		return "", err
+	}
+	cfg, err := a.storage.Load()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(cfg.License.Code), nil
+}
+
+func (a *App) GetLicenseStatus() (model.LicenseStatus, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.LicenseStatus{}, err
+	}
+	if a.license == nil {
+		return model.LicenseStatus{}, fmt.Errorf("license service is not initialized")
+	}
+	machineID, err := a.GetMachineID()
+	if err != nil {
+		return model.LicenseStatus{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	status, err := a.license.GetStatus(ctx, machineID)
+	if err != nil {
+		return model.LicenseStatus{}, err
+	}
+	if err := a.saveLicenseCode(status.Code); err != nil {
+		slog.Warn("save license code failed", "error", err)
+	}
+	return status, nil
+}
+
+func (a *App) RedeemLicenseCode(code string) (model.LicenseRedeemResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.LicenseRedeemResult{}, err
+	}
+	if a.license == nil {
+		return model.LicenseRedeemResult{}, fmt.Errorf("license service is not initialized")
+	}
+	machineID, err := a.GetMachineID()
+	if err != nil {
+		return model.LicenseRedeemResult{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, err := a.license.Redeem(ctx, machineID, code)
+	if err != nil {
+		return model.LicenseRedeemResult{}, err
+	}
+	if err := a.saveLicenseCode(result.Code); err != nil {
+		slog.Warn("save license code failed", "error", err)
+	}
+	return result, nil
+}
+
 func (a *App) CheckForUpdates(currentVersion string) (updater.Result, error) {
 	if err := a.ensureReady(); err != nil {
 		return updater.Result{}, err
@@ -250,6 +315,18 @@ func (a *App) CheckForUpdates(currentVersion string) (updater.Result, error) {
 		return updater.Result{}, fmt.Errorf("updater service is not initialized")
 	}
 	return a.updater.Check(context.Background(), currentVersion)
+}
+
+func (a *App) saveLicenseCode(code string) error {
+	if a.storage == nil {
+		return fmt.Errorf("storage is not initialized")
+	}
+	trimmed := strings.TrimSpace(code)
+	_, err := a.storage.Update(func(cfg *conf.Config) error {
+		cfg.License.Code = trimmed
+		return nil
+	})
+	return err
 }
 
 // syncAutoRunWithConfig aligns OS auto-run (launch at login) state with config.
