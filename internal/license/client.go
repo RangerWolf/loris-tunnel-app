@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -16,8 +15,9 @@ import (
 )
 
 const (
-	defaultBackendAPIBaseURL = "http://localhost:8000/api/v1"
-	requestTimeout           = 10 * time.Second
+	devBackendAPIBaseURL  = "http://localhost:8000/api/v1"
+	prodBackendAPIBaseURL = "https://loris-tunnel-prod.flyml.net/api/v1"
+	requestTimeout        = 10 * time.Second
 )
 
 type Client struct {
@@ -36,15 +36,32 @@ type apiErrorResponse struct {
 }
 
 func NewDefaultClient() *Client {
-	baseURL := strings.TrimSpace(os.Getenv("LORIS_TUNNEL_BACKEND_API_BASE_URL"))
-	if baseURL == "" {
-		baseURL = defaultBackendAPIBaseURL
-	}
-	baseURL = strings.TrimRight(baseURL, "/")
+	return NewClientByBuildType("production")
+}
+
+func NewClientByBuildType(buildType string) *Client {
+	baseURL := resolveBaseURLByBuildType(buildType)
 
 	return &Client{
 		baseURL:    baseURL,
 		httpClient: &http.Client{Timeout: requestTimeout},
+	}
+}
+
+func (c *Client) BaseURL() string {
+	if c == nil {
+		return ""
+	}
+	return c.baseURL
+}
+
+func resolveBaseURLByBuildType(buildType string) string {
+	switch strings.ToLower(strings.TrimSpace(buildType)) {
+	case "dev":
+		return strings.TrimRight(devBackendAPIBaseURL, "/")
+	default:
+		// Any non-dev build type (e.g. production/debug) uses production backend.
+		return strings.TrimRight(prodBackendAPIBaseURL, "/")
 	}
 }
 

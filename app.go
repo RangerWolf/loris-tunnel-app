@@ -16,6 +16,8 @@ import (
 	"loris-tunnel/internal/license"
 	"loris-tunnel/internal/model"
 	"loris-tunnel/internal/updater"
+
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App struct
@@ -105,6 +107,9 @@ func configureLogger(configPath string, level slog.Level) error {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	buildType := wailsruntime.Environment(ctx).BuildType
+	a.license = license.NewClientByBuildType(buildType)
+	slog.Info("license client initialized", "build_type", buildType, "api_base_url", a.license.BaseURL())
 	slog.Info("app startup")
 	if err := a.ensureReady(); err == nil {
 		a.syncAutoRunWithConfig()
