@@ -260,10 +260,26 @@
         "build": "构建",
         "updateProduct": "更新与产品",
         "checkUpdates": "检查更新",
+        "checkingUpdates": "检查中...",
         "openReleases": "打开 Releases 页面",
         "upgradePro": "升级到 Pro",
         "proExpires": "Pro 到期于 {date}",
         "manageLicense": "管理授权 (即将来临)",
-        "licenseCode": "注册码"
+        "licenseCode": "注册码",
+        "configFile": "配置文件",
+        "manageConfig": "配置文件管理",
+        "manageConfigDesc": "导出或导入当前配置，或打开包含配置文件的本地目录",
+        "exportConfig": "导出配置",
+        "exportConfigBtn": "导出",
+        "exportConfigDesc": "将 config.toml 备份到指定位置",
+        "importConfig": "导入配置",
+        "importConfigBtn": "导入",
+        "importConfigDesc": "从 TOML 文件加载配置（会停止并重启隧道）",
+        "openConfigDir": "打开配置目录",
+        "openConfigDirBtn": "打开目录",
+        "openConfigDirDesc": "打开配置文件所在目录",
+        "exportSuccess": "配置导出成功。",
+        "importSuccess": "配置导入成功，自动启动的隧道已重新启动。",
+        "importConfirm": "此操作将永久覆盖当前配置（不可恢复），运行中的隧道将被停止并重启。确认继续吗？"
     }
 }

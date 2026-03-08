@@ -94,7 +94,7 @@ func (r *Storage) loadLocked() (*Config, error) {
 		return cfg, nil
 	}
 
-	cfg, err := parseConfigTOML(data)
+	cfg, err := ParseConfigTOML(data)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,10 @@ func (r *Storage) ensureParentDirLocked() error {
 	return os.MkdirAll(dir, 0o755)
 }
 
-func parseConfigTOML(data []byte) (*Config, error) {
+// ParseConfigTOML parses a TOML configuration from raw bytes.
+// Exported so callers (e.g. import validation in app.go) can validate a file
+// before replacing the live config.
+func ParseConfigTOML(data []byte) (*Config, error) {
 	cfg := DefaultConfig()
 	if _, err := toml.Decode(string(data), cfg); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidTOMLConfigurationFile, err)

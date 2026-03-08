@@ -260,10 +260,26 @@
         "build": "Build",
         "updateProduct": "Update & Product",
         "checkUpdates": "Check for Updates",
+        "checkingUpdates": "Checking...",
         "openReleases": "Open Releases Page",
         "upgradePro": "Upgrade to Pro",
         "proExpires": "Pro expires on {date}",
         "manageLicense": "Manage License (Soon)",
-        "licenseCode": "License Code"
+        "licenseCode": "License Code",
+        "configFile": "Config File",
+        "manageConfig": "Manage Config",
+        "manageConfigDesc": "Export or import your config, or open the local config directory",
+        "exportConfig": "Export Config",
+        "exportConfigBtn": "Export",
+        "exportConfigDesc": "Save a backup copy of config.toml to a chosen location",
+        "importConfig": "Import Config",
+        "importConfigBtn": "Import",
+        "importConfigDesc": "Load config from a TOML file (stops and restarts tunnels)",
+        "openConfigDir": "Open Config Dir",
+        "openConfigDirBtn": "Open Dir",
+        "openConfigDirDesc": "Open the config directory",
+        "exportSuccess": "Config exported successfully.",
+        "importSuccess": "Config imported. Auto-start tunnels have been restarted.",
+        "importConfirm": "This will permanently overwrite your current config (irreversible). Active tunnels will be stopped and restarted. Continue?"
     }
 }

@@ -488,6 +488,11 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
+  margin-bottom: 1.2rem;
+}
+
+.config-row:last-child {
+  margin-bottom: 0px;
 }
 
 .config-name {
@@ -497,8 +502,9 @@
 }
 
 .config-desc {
-  margin-top: 0.2rem;
+  margin-top: 0.05rem;
   font-size: 0.78rem;
+  line-height: 1.3;
   color: var(--lt-muted);
 }
 
@@ -725,7 +731,7 @@
   transform: translateX(-0.08em);
 }
 
-.action-btn-group > .btn:not(:last-of-type) {
+.action-btn-group>.btn:not(:last-of-type) {
   border-right: none;
 }
 

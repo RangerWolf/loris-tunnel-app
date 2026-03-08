@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -373,4 +375,145 @@ func (a *App) SetAutoRunEnabled(enabled bool) error {
 		return autostart.Enable()
 	}
 	return autostart.Disable()
+}
+
+// GetConfigPath returns the absolute path of the current config file.
+func (a *App) GetConfigPath() (string, error) {
+	if err := a.ensureReady(); err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(a.storage.Path())
+	if err != nil {
+		return a.storage.Path(), nil
+	}
+	return abs, nil
+}
+
+// ExportConfig copies the current config.toml to destPath.
+// ExportConfigWithDialog opens a save-file dialog, then copies the config.
+// Returns empty string if the user cancelled.
+func (a *App) ExportConfigWithDialog() error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	destPath, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
+		DefaultFilename: "config.toml",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "TOML Config (*.toml)", Pattern: "*.toml"},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("file dialog: %w", err)
+	}
+	if strings.TrimSpace(destPath) == "" {
+		return nil // user cancelled
+	}
+	return a.ExportConfig(destPath)
+}
+
+func (a *App) ExportConfig(destPath string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	destPath = strings.TrimSpace(destPath)
+	if destPath == "" {
+		return fmt.Errorf("destination path is empty")
+	}
+
+	src, err := os.Open(a.storage.Path())
+	if err != nil {
+		return fmt.Errorf("open config file: %w", err)
+	}
+	defer src.Close()
+
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return fmt.Errorf("create destination directory: %w", err)
+	}
+
+	dst, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("create destination file: %w", err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return fmt.Errorf("copy config file: %w", err)
+	}
+	slog.Info("config exported", "dest", destPath)
+	return nil
+}
+
+// SelectImportFile opens a file picker and returns the selected path. Returns empty string if cancelled.
+func (a *App) SelectImportFile() (string, error) {
+	if err := a.ensureReady(); err != nil {
+		return "", err
+	}
+	srcPath, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "TOML Config (*.toml)", Pattern: "*.toml"},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("file dialog: %w", err)
+	}
+	return strings.TrimSpace(srcPath), nil
+}
+
+// ImportConfig replaces the current config with the TOML file at srcPath.
+// It validates the file first, then stops all running tunnels, replaces the
+// config file, and restarts auto-start tunnels.
+func (a *App) ImportConfig(srcPath string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	srcPath = strings.TrimSpace(srcPath)
+	if srcPath == "" {
+		return fmt.Errorf("source path is empty")
+	}
+
+	// Validate: can we parse it as a valid config?
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("read source file: %w", err)
+	}
+	if _, err := conf.ParseConfigTOML(data); err != nil {
+		return fmt.Errorf("invalid config file: %w", err)
+	}
+
+	// Stop all running tunnels.
+	if a.tunnel != nil {
+		a.tunnel.Shutdown()
+	}
+
+	// Overwrite config file atomically.
+	tmpPath := a.storage.Path() + ".import.tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return fmt.Errorf("write temp config: %w", err)
+	}
+	if err := os.Rename(tmpPath, a.storage.Path()); err != nil {
+		return fmt.Errorf("replace config file: %w", err)
+	}
+
+	// Reinitialise biz layer so the new config takes effect.
+	a.jumper = biz.NewJumperBiz(a.storage)
+	a.tunnel = biz.NewTunnelBiz(a.storage)
+
+	// Restart auto-start tunnels.
+	_ = a.tunnel.StartAutoStart()
+
+	slog.Info("config imported", "src", srcPath)
+	return nil
+}
+
+// OpenConfigDir opens the config file's parent directory in the OS file manager.
+func (a *App) OpenConfigDir() error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	dir := filepath.Dir(a.storage.Path())
+	cmd := exec.Command("open", dir)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("open config dir: %w", err)
+	}
+	return nil
 }

@@ -64,12 +64,13 @@ const DEFAULT_RELEASES_PAGE_URL = 'https://github.com/RangerWolf/loris-tunnel-ap
 const releasePageUrl = ref(DEFAULT_RELEASES_PAGE_URL)
 const showOverviewActive = ref(true)
 const showOverviewActivity = ref(true)
+const isCheckingUpdates = ref(false)
 
 const appMeta = reactive({
-  version: '0.17.3-alpha',
+  version: '0.17.4-alpha',
   channel: 'Community',
   updater: 'GitHub Releases API (via Go backend)',
-  build: '2026-03-07'
+  build: '2026-03-08'
 })
 const proLicense = reactive({
   isPro: false,
@@ -495,6 +496,8 @@ async function loadStoredLicenseCode() {
 }
 
 async function checkForUpdates() {
+  if (isCheckingUpdates.value) return
+  isCheckingUpdates.value = true
   try {
     const result = await CheckForUpdatesAPI(appMeta.version)
 
@@ -519,6 +522,8 @@ async function checkForUpdates() {
     const message = errorMessage(err, 'Failed to check updates from GitHub Releases API.')
     configMessage.value = message
     logEvent('error', message)
+  } finally {
+    isCheckingUpdates.value = false
   }
 }
 
@@ -1387,11 +1392,14 @@ watch(
           :license-code="proLicense.code"
           :config-message="configMessage"
           :show-release-page-button="showReleasePageButton"
+          :is-checking-updates="isCheckingUpdates"
           @theme-change="setThemeBySwitch"
           @check-updates="checkForUpdates"
           @open-release-page="openReleasePage"
           @upgrade="openProUpgrade"
           @set-config-message="setConfigMessage"
+          @reload-state="loadStateFromBackend"
+          @confirm-action="openActionDialog"
         />
       </main>
     </section>
