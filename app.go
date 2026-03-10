@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -506,12 +507,24 @@ func (a *App) ImportConfig(srcPath string) error {
 }
 
 // OpenConfigDir opens the config file's parent directory in the OS file manager.
+// It supports macOS, Windows and Linux (via xdg-open).
 func (a *App) OpenConfigDir() error {
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
 	dir := filepath.Dir(a.storage.Path())
-	cmd := exec.Command("open", dir)
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", dir)
+	case "windows":
+		cmd = exec.Command("explorer", dir)
+	default:
+		// Most desktop Linux environments provide xdg-open.
+		cmd = exec.Command("xdg-open", dir)
+	}
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("open config dir: %w", err)
 	}

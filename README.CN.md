@@ -105,11 +105,15 @@ wails build
 
 ## 配置文件
 
-Loris Tunnel 使用 TOML 格式存储配置，默认路径解析顺序：
+Loris Tunnel 使用 TOML 格式存储配置，路径解析规则如下：
 
-- 若当前工作目录可写：`./config.toml`
-- 否则：`~/.loris-tunnel/config.toml`
-- 也可通过环境变量覆盖：`LORIS_TUNNEL_CONFIG_PATH`
+- **开发模式（`wails dev`）**：
+  - 若当前工作目录可写：使用 `./config.toml`
+  - 否则：使用 `~/.loris-tunnel/config.toml`
+- **打包后的生产版本（二进制，可执行文件，包括开机自启动）**：
+  - 始终使用 `~/.loris-tunnel/config.toml`
+
+在以上任意模式下，如果目标配置文件不存在或内容为空，Loris Tunnel 会在首次运行时自动创建一个默认配置文件。
 
 配置示例：
 

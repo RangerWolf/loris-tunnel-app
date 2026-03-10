@@ -73,10 +73,11 @@ func TestKeepAliveRequestTimeoutBoundaries(t *testing.T) {
 		interval time.Duration
 		want     time.Duration
 	}{
-		{interval: 0, want: 3 * time.Second},
-		{interval: 2 * time.Second, want: 2 * time.Second},
-		{interval: 5 * time.Second, want: 2500 * time.Millisecond},
-		{interval: 12 * time.Second, want: 5 * time.Second},
+		{interval: 0, want: 5 * time.Second},
+		{interval: 2 * time.Second, want: 5 * time.Second},
+		{interval: 5 * time.Second, want: 5 * time.Second},
+		{interval: 12 * time.Second, want: 6 * time.Second},
+		{interval: 30 * time.Second, want: 10 * time.Second},
 	}
 
 	for _, tc := range cases {

@@ -3,6 +3,7 @@ package conf
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,8 +34,84 @@ func NewStorage(path string) (*Storage, error) {
 	return &Storage{path: trimmed}, nil
 }
 
+// MigrateFromLocalConfigIfNeeded runs a one-time migration for users who previously
+// used config.toml from the current directory. When the target config path is
+// ~/.loris-tunnel/config.toml and that file does not exist, but ./config.toml exists
+// in the process working directory, it copies the local file to the home path and
+// renames the local file to config.toml.old. No-op if any condition is not met.
+func MigrateFromLocalConfigIfNeeded(targetPath string) error {
+	targetPath = strings.TrimSpace(targetPath)
+	if targetPath == "" {
+		return nil
+	}
+
+	homePath := GetHomeConfigPath()
+	if homePath == "" {
+		return nil
+	}
+
+	targetAbs, err := filepath.Abs(targetPath)
+	if err != nil {
+		return nil
+	}
+	homeAbs, err := filepath.Abs(homePath)
+	if err != nil {
+		return nil
+	}
+	if filepath.Clean(targetAbs) != filepath.Clean(homeAbs) {
+		return nil
+	}
+
+	if _, err := os.Stat(targetPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("check target config exists: %w", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	localPath := filepath.Join(cwd, "config.toml")
+	if _, err := os.Stat(localPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("check local config exists: %w", err)
+	}
+	if localAbs, err := filepath.Abs(localPath); err == nil && filepath.Clean(localAbs) == filepath.Clean(targetAbs) {
+		return nil
+	}
+
+	data, err := os.ReadFile(localPath)
+	if err != nil {
+		return err
+	}
+
+	dir := filepath.Dir(targetPath)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create config dir for migration: %w", err)
+		}
+	}
+	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+		return fmt.Errorf("write migrated config: %w", err)
+	}
+
+	oldPath := localPath + ".old"
+	if err := os.Rename(localPath, oldPath); err != nil {
+		return fmt.Errorf("rename local config to .old: %w", err)
+	}
+
+	return nil
+}
+
 func NewDefaultStorage() (*Storage, error) {
-	return NewStorage(ResolveConfigPath())
+	path := ResolveConfigPath()
+	if err := MigrateFromLocalConfigIfNeeded(path); err != nil {
+		slog.Warn("config migration failed", "target", path, "error", err)
+	}
+	return NewStorage(path)
 }
 
 func (r *Storage) Load() (*Config, error) {

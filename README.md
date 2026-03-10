@@ -105,11 +105,15 @@ wails build
 
 ## Configuration
 
-Loris Tunnel stores its configuration in a TOML file. Default resolution order:
+Loris Tunnel stores its configuration in a TOML file. Resolution rules:
 
-- If the current working directory is writable: `./config.toml`
-- Otherwise: `~/.loris-tunnel/config.toml`
-- Override with env var: `LORIS_TUNNEL_CONFIG_PATH`
+- **Development (`wails dev`)**:
+  - If the current working directory is writable: `./config.toml`
+  - Otherwise: `~/.loris-tunnel/config.toml`
+- **Built/production binary (including auto-start on login)**:
+  - Always: `~/.loris-tunnel/config.toml`
+
+In all cases, if the target config file does not exist or is empty, Loris Tunnel will automatically create it with a default configuration on first run.
 
 Example configuration:
 

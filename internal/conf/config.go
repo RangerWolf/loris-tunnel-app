@@ -25,7 +25,7 @@ func isDirWritable(dir string) bool {
 // getDefaultConfigDir returns the default config directory for the app.
 // Priority:
 // 1. Current directory (if writable) - for development and portable mode
-// 2. User config directory (~/.config/loris-tunnel/) - for installed apps
+// 2. User config directory (~/.loris-tunnel/) - for installed apps
 func getDefaultConfigDir() string {
 	// Try current directory first (for development and portable mode)
 	cwd, err := os.Getwd()
@@ -55,12 +55,38 @@ type LicenseConfig struct {
 	Code string `toml:"code"`
 }
 
-// ResolveConfigPath returns config path from env or default path.
-// Default path follows getDefaultConfigDir() and ends with config.toml.
-func ResolveConfigPath() string {
-	if path := strings.TrimSpace(os.Getenv("LORIS_TUNNEL_CONFIG_PATH")); path != "" {
-		return path
+// GetHomeConfigPath returns the absolute path for the home config file
+// (~/.loris-tunnel/config.toml). Empty string if UserHomeDir fails.
+func GetHomeConfigPath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		return ""
 	}
+	return filepath.Join(homeDir, ".loris-tunnel", defaultConfigPath)
+}
+
+// ResolveConfigPath returns config path based on runtime mode.
+// Priority:
+// 1. Dev mode (wails dev): current directory first (portable), then user config dir
+// 2. Build/production: fixed user config dir (~/.loris-tunnel/config.toml)
+func ResolveConfigPath() string {
+	// When running under `wails dev`, the devserver environment variable is set.
+	// In this mode we prefer a portable, current-directory-first config path so
+	// that developers can keep config.toml beside the project.
+	if strings.TrimSpace(os.Getenv("devserver")) != "" {
+		return filepath.Join(getDefaultConfigDir(), defaultConfigPath)
+	}
+
+	// For built/production binaries we want a stable location that does not
+	// depend on the process working directory (important for Windows shortcuts,
+	// auto-start entries, etc.). Always use the user's home directory with a
+	// `.loris-tunnel` subdirectory.
+	if homePath := GetHomeConfigPath(); homePath != "" {
+		return homePath
+	}
+
+	// Fallback: reuse the previous logic, which prefers current directory when
+	// possible and otherwise falls back to the user config directory.
 	return filepath.Join(getDefaultConfigDir(), defaultConfigPath)
 }
 
