@@ -67,7 +67,7 @@ const showOverviewActivity = ref(true)
 const isCheckingUpdates = ref(false)
 
 const appMeta = reactive({
-  version: '0.19.1-alpha',
+  version: '0.19.2-alpha',
   channel: 'Community',
   updater: 'GitHub Releases API (via Go backend)',
   build: '2026-03-13'
