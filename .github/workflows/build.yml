@@ -98,13 +98,26 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
 
-      # 【步骤 9】创建 DMG 安装包
       # 使用 create-dmg 工具进行带背景图的精细化打包
+      # 【步骤 9】创建 DMG 安装包 (增强安全兼容性)
       - name: Create DMG Installer
         run: |
           cd build/bin
           
-          # 调用 create-dmg 工具，下面这些坐标参数就是决定排版的关键
+          # 1. 确保可执行文件拥有运行权限
+          # Wails 默认生成的可执行文件在 Contents/MacOS/ 目录下
+          chmod +x "loris-tunnel.app/Contents/MacOS/loris-tunnel"
+          
+          # 2. 清除可能存在的隔离属性和多余元数据
+          # 防止打包进去的 App 自带“待核实”标记
+          xattr -cr "loris-tunnel.app"
+          
+          # 3. 进行 Ad-hoc 签名（伪签名）
+          # 这是最关键的一步！对于没有开发者证书的开源项目，这能告诉 macOS：
+          # “虽然我没公证，但我经过了完整的本地签名校验”，这能极大减少“损坏”报错。
+          codesign --force --deep --sign - "loris-tunnel.app"
+          
+          # 4. 执行原有的 create-dmg
           create-dmg \
             --volname "loris-tunnel" \
             --background "../../dmg-bg.png" \
@@ -115,7 +128,7 @@ jobs:
             --hide-extension "loris-tunnel.app" \
             --app-drop-link 490 200 \
             "loris-tunnel.dmg" \
-            "loris-tunnel.app"
+            "loris-tunnel.app"  
 
       # 【步骤 10】打包收尾：把编译出来的 DMG 文件上传到 GitHub 的后台。
       # 因为虚拟机用完马上就会被销毁，不上传的话打包出来的东西就全没了。
