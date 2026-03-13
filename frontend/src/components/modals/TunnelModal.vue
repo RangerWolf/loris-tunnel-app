@@ -187,7 +187,7 @@ function onPrimaryJumperChange(event) {
 </script>
 
 <template>
-  <div v-if="show" class="overlay" @click.self="$emit('close')">
+  <div v-if="show" class="overlay">
     <div class="dialog-card dialog-large compact-dialog tunnel-dialog">
       <div class="dialog-head">
         <h3 class="dialog-title">{{ editingTunnelId ? $t('app.modals.tunnel.editTitle') : $t('app.modals.tunnel.newTitle') }}</h3>

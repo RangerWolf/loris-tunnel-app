@@ -120,7 +120,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="show" class="overlay" @click.self="$emit('close')">
+  <div v-if="show" class="overlay">
     <div class="dialog-card compact-dialog jumper-dialog">
       <div class="dialog-head">
         <h3 class="dialog-title">{{ editingJumperId ? $t('app.modals.jumper.editTitle') : $t('app.modals.jumper.newTitle') }}</h3>

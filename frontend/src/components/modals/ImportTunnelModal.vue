@@ -687,7 +687,7 @@ watch(
 </script>
 
 <template>
-  <div v-if="show" class="overlay" @click.self="handleClose">
+  <div v-if="show" class="overlay">
     <div class="dialog-card dialog-large compact-dialog import-tunnel-dialog">
       <div class="dialog-head">
         <h3 class="dialog-title">{{ $t('app.modals.importTunnel.title') }}</h3>

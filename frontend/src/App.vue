@@ -67,10 +67,10 @@ const showOverviewActivity = ref(true)
 const isCheckingUpdates = ref(false)
 
 const appMeta = reactive({
-  version: '0.18.1-alpha',
+  version: '0.19.1-alpha',
   channel: 'Community',
   updater: 'GitHub Releases API (via Go backend)',
-  build: '2026-03-08'
+  build: '2026-03-13'
 })
 const proLicense = reactive({
   isPro: false,
@@ -1412,7 +1412,6 @@ watch(
     tabindex="-1"
     aria-modal="true"
     role="dialog"
-    @click.self="closeActionDialog"
   >
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
@@ -1441,7 +1440,7 @@ watch(
   </div>
   <div v-if="actionDialog.visible" class="modal-backdrop fade show" />
 
-  <div v-if="redeemDialog.visible" class="overlay" @click.self="closeRedeemDialog">
+  <div v-if="redeemDialog.visible" class="overlay">
     <div class="dialog-card compact-dialog redeem-dialog">
       <div class="dialog-head">
         <h3 class="dialog-title">{{ locale === 'zh-CN' ? '输入邀请码' : 'Enter License Code' }}</h3>
