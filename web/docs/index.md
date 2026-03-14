@@ -6,7 +6,7 @@ hero:
   text: "Efficient SSH Tunnel Management"
   tagline: "A desktop GUI application for managing SSH tunnels — with automatic reconnection and a clean interface."
   image:
-    src: ./imgs/logo.png
+    src: /logo.png
     alt: Loris Tunnel Logo
   actions:
     - theme: brand
