@@ -163,6 +163,7 @@ remote_port = 5432
 Join our QQ group for discussions, support, and updates:
 
 - 💬 **QQ Group**: **1009737419**
+- 📧 **Email**: [yang.rangerwolf@gmail.com](mailto:yang.rangerwolf@gmail.com)
 
 ---
 

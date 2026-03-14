@@ -1,0 +1,87 @@
+---
+title: Sample Article for Loris Tunnel
+description: This is a sample article demonstrating how to write content for VitePress.
+---
+
+# Sample Article Title
+
+This is a sample article designed to show you how to use **VitePress** features. You can use this as a template for your own SEO-focused content.
+
+## Markdown Basics
+
+You can use standard Markdown like:
+- **Bold text**
+- *Italic text*
+- [Links](https://github.com/RangerWolf/loris-tunnel-app/)
+
+## Custom Containers
+
+VitePress provides specialized containers for tips, warnings, and info:
+
+::: tip SEO Tip
+Write descriptive titles and meta descriptions in the frontmatter (the text at the top between `---`) to help search engines find your content.
+:::
+
+::: info SSH Tunneling
+Combining **SSH Tunnels** with other tools like **OpenClaw** can significantly improve your network flexibility.
+:::
+
+## Advanced Containers
+
+In addition to basic tips, you can use **collapsible details** and **warnings**:
+
+::: warning Caution
+Be careful when modifying SSH configurations directly.
+:::
+
+::: details Click to see a hidden tip
+You can hide complex technical details or long logs using the `details` container.
+:::
+
+## Status Badges
+
+You can add colorful badges to highlight versions or status:
+- Features: <Badge type="tip" text="v2.0+" />
+- Support: <Badge type="warning" text="Beta" />
+- Security: <Badge type="danger" text="Critical" />
+
+## Tables
+
+Standard GitHub Flavored Markdown tables are fully supported:
+
+| Feature | Supported | Version |
+| ------- | --------- | ------- |
+| Local Forwarding | ✅ | v1.0 |
+| Dynamic Port | ✅ | v1.5 |
+| Jumper Chains | ✅ | v2.0 |
+
+## Enhanced Code Blocks
+
+You can highlight specific lines in code blocks using curly braces:
+
+```go {3}
+func main() {
+    // This line is highlighted
+    println("Advanced logging enabled")
+}
+```
+
+You can also add line numbers:
+
+```go:line-numbers {1,3}
+package main
+
+func main() {
+    println("Line 1 and 3 are highlighted with numbers")
+}
+```
+
+## Internal Links
+
+VitePress handles internal links automatically. You can point to other articles or headers:
+- Back to [Introduction](./introduction)
+- Go to [Image Section](#including-images)
+
+---
+
+*Keep this reference handy while building your documentation!*

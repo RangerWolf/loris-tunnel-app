@@ -163,6 +163,7 @@ remote_port = 5432
 欢迎加入 QQ 群参与讨论、获取支持和最新动态：
 
 - 💬 **QQ 交流群**: **1009737419**
+- 📧 **联系作者**: [yang.rangerwolf@gmail.com](mailto:yang.rangerwolf@gmail.com)
 
 ---
 
