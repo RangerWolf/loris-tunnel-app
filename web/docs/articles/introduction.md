@@ -2,7 +2,7 @@
 
 **Loris Tunnel** wraps the power of SSH port forwarding into a user-friendly UI, with automatic reconnection to keep your tunnels alive.
 
-![Overview](../screenshots/screenshot-overview.png)
+![Overview](../imgs/screenshot-overview.png)
 
 ## Features
 
@@ -11,7 +11,7 @@
 - 🔀 **Multiple Modes** — Local, remote, and dynamic (SOCKS5) port forwarding supported.
 - ▶️ **Auto-start** — Mark tunnels to open automatically when the app starts.
 
-![Import](../screenshots/screenshot-create-tunnels-from-ssh-command.png)
+![Import](../imgs/screenshot-create-tunnels-from-ssh-command.png)
 
 ## Why Loris Tunnel?
 

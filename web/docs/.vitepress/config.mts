@@ -5,7 +5,7 @@ export default defineConfig({
     title: "Loris Tunnel",
     description: "A desktop GUI application for managing SSH tunnels — with automatic reconnection and a clean interface.",
     themeConfig: {
-        logo: '/logo.png',
+        logo: '../imgs/logo.png',
         // https://vitepress.dev/reference/default-theme-config
         nav: [
             { text: 'Home', link: '/' },
