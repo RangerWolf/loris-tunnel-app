@@ -3,6 +3,8 @@
         "title": "Loris Tunnel",
         "sidebar": {
             "subtitle": "SSH Tunnel Manager",
+            "collapse": "Collapse sidebar",
+            "expand": "Expand sidebar",
             "overview": "Overview",
             "overviewSubtitle": "Core operational status and recent activity",
             "jumpers": "Jumpers",
@@ -65,6 +67,12 @@
             "title": "All Tunnels",
             "noTunnels": "No tunnel yet",
             "errorReason": "Error",
+            "jumperPanel": {
+                "title": "Jumpers",
+                "collapse": "Collapse jumper list",
+                "expand": "Expand jumper list",
+                "all": "All"
+            },
             "table": {
                 "name": "Name",
                 "mode": "Mode",

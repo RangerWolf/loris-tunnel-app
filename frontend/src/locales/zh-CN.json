@@ -3,6 +3,8 @@
         "title": "Loris Tunnel",
         "sidebar": {
             "subtitle": "SSH 隧道管理",
+            "collapse": "收起侧边栏",
+            "expand": "展开侧边栏",
             "overview": "概览",
             "overviewSubtitle": "核心运行状态与近期活动",
             "jumpers": "跳板机",
@@ -65,6 +67,12 @@
             "title": "所有隧道",
             "noTunnels": "暂无隧道",
             "errorReason": "错误原因",
+            "jumperPanel": {
+                "title": "跳板机",
+                "collapse": "收起跳板机列表",
+                "expand": "展开跳板机列表",
+                "all": "全部"
+            },
             "table": {
                 "name": "名称",
                 "mode": "模式",

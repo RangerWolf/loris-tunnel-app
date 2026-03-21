@@ -2,11 +2,15 @@
 import IconActionButton from '../common/IconActionButton.vue'
 import TooltipText from '../common/TooltipText.vue'
 import { Dropdown } from 'bootstrap'
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
   tunnels: {
+    type: Array,
+    required: true
+  },
+  jumpers: {
     type: Array,
     required: true
   },
@@ -21,10 +25,14 @@ const props = defineProps({
   getTunnelJumperLabel: {
     type: Function,
     required: true
+  },
+  selectedJumperId: {
+    type: Number,
+    default: null
   }
 })
 
-const emit = defineEmits(['toggle-tunnel', 'copy-tunnel', 'edit-tunnel', 'delete-tunnel', 'update-search-query'])
+const emit = defineEmits(['toggle-tunnel', 'copy-tunnel', 'edit-tunnel', 'delete-tunnel', 'update-search-query', 'select-jumper'])
 const { t } = useI18n()
 
 const rootRef = ref(null)
@@ -33,6 +41,39 @@ const expandedErrorIds = ref(new Set())
 const copiedErrorIds = ref(new Set())
 const copyResetTimers = new Map()
 const ACTION_DROPDOWN_READY_ATTR = 'data-lt-action-dropdown-ready'
+const showJumperPanel = ref(true)
+
+// Jumper panel state
+const jumperList = computed(() => {
+  return props.jumpers.map(jumper => {
+    const tunnelCount = props.tunnels.filter(tunnel => {
+      const ids = Array.isArray(tunnel.jumperIds) ? tunnel.jumperIds : []
+      return ids.includes(jumper.id)
+    }).length
+    return {
+      ...jumper,
+      tunnelCount
+    }
+  }).filter(j => j.tunnelCount > 0)
+})
+
+const filteredTunnels = computed(() => {
+  if (props.selectedJumperId === null) {
+    return props.tunnels
+  }
+  return props.tunnels.filter(tunnel => {
+    const ids = Array.isArray(tunnel.jumperIds) ? tunnel.jumperIds : []
+    return ids.includes(props.selectedJumperId)
+  })
+})
+
+function toggleJumperPanel() {
+  showJumperPanel.value = !showJumperPanel.value
+}
+
+function selectJumper(jumperId) {
+  emit('select-jumper', jumperId)
+}
 
 watch(() => props.searchQuery, (newValue) => {
   localSearchQuery.value = newValue
@@ -365,7 +406,17 @@ function onActionSelect(event, action, tunnel) {
 <template>
   <section ref="rootRef" class="page-fade panel-card">
     <div class="panel-head">
-      <h2 class="panel-title mb-0">{{ $t('app.tunnels.title') }}</h2>
+      <div class="d-flex align-items-center gap-2">
+        <h2 class="panel-title mb-0">{{ $t('app.tunnels.title') }}</h2>
+        <button
+          class="btn btn-outline-secondary btn-sm collapse-btn"
+          type="button"
+          :title="showJumperPanel ? $t('app.tunnels.jumperPanel.collapse') : $t('app.tunnels.jumperPanel.expand')"
+          @click="toggleJumperPanel"
+        >
+          <i class="bi" :class="showJumperPanel ? 'bi-chevron-left' : 'bi-chevron-right'"></i>
+        </button>
+      </div>
       <div class="search-box">
         <div class="input-group input-group-sm">
           <span class="input-group-text">
@@ -391,8 +442,36 @@ function onActionSelect(event, action, tunnel) {
         </div>
       </div>
     </div>
-    <div class="table-responsive page-table-wrap tunnels-table-wrap">
-      <table class="table align-middle mb-0 tunnels-table">
+    <div class="tunnels-content" :class="{ 'with-jumper-panel': showJumperPanel }">
+      <!-- Left: Jumper filter panel -->
+      <div v-if="showJumperPanel" class="jumper-filter-panel">
+        <div class="jumper-filter-header">
+          <span class="jumper-filter-title">{{ $t('app.tunnels.jumperPanel.title') }}</span>
+        </div>
+        <div class="jumper-filter-list">
+          <button
+            class="jumper-filter-item"
+            :class="{ active: selectedJumperId === null }"
+            @click="selectJumper(null)"
+          >
+            <span class="jumper-filter-name">{{ $t('app.tunnels.jumperPanel.all') }}</span>
+            <span class="jumper-filter-count">{{ tunnels.length }}</span>
+          </button>
+          <button
+            v-for="jumper in jumperList"
+            :key="jumper.id"
+            class="jumper-filter-item"
+            :class="{ active: selectedJumperId === jumper.id }"
+            @click="selectJumper(jumper.id)"
+          >
+            <span class="jumper-filter-name">{{ jumper.name }}</span>
+            <span class="jumper-filter-count">{{ jumper.tunnelCount }}</span>
+          </button>
+        </div>
+      </div>
+      <!-- Right: Tunnel table -->
+      <div class="table-responsive page-table-wrap tunnels-table-wrap">
+        <table class="table align-middle mb-0 tunnels-table">
         <thead>
           <tr>
             <th class="tunnel-name-cell">{{ $t('app.tunnels.table.name') }}</th>
@@ -405,10 +484,10 @@ function onActionSelect(event, action, tunnel) {
           </tr>
         </thead>
         <tbody>
-          <tr v-if="tunnels.length === 0">
+          <tr v-if="filteredTunnels.length === 0">
             <td colspan="7" class="text-muted py-4">{{ $t('app.tunnels.noTunnels') }}</td>
           </tr>
-          <template v-for="tunnel in tunnels" :key="`tunnel-${tunnel.id}`">
+          <template v-for="tunnel in filteredTunnels" :key="`tunnel-${tunnel.id}`">
             <tr>
               <td class="fw-semibold tunnel-name-cell">
                 <TooltipText :text="tunnel.name" class-name="cell-ellipsis" />
@@ -532,6 +611,90 @@ function onActionSelect(event, action, tunnel) {
           </template>
         </tbody>
       </table>
+      </div>
     </div>
   </section>
 </template>
+
+<style scoped>
+.collapse-btn {
+  padding: 4px 8px;
+}
+
+.tunnels-content {
+  display: flex;
+  height: calc(100vh - 180px);
+}
+
+.tunnels-content.with-jumper-panel .tunnels-table-wrap {
+  flex: 1;
+}
+
+.jumper-filter-panel {
+  width: 200px;
+  min-width: 200px;
+  border-right: 1px solid var(--bs-border-color);
+  overflow-y: auto;
+  background: var(--bs-body-bg);
+}
+
+.jumper-filter-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
+}
+
+.jumper-filter-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--bs-secondary-color);
+}
+
+.jumper-filter-list {
+  padding: 8px;
+}
+
+.jumper-filter-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bs-body-color);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.jumper-filter-item:hover {
+  background: var(--bs-tertiary-bg);
+}
+
+.jumper-filter-item.active {
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-primary);
+}
+
+.jumper-filter-name {
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jumper-filter-count {
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+  background: var(--bs-tertiary-bg);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.jumper-filter-item.active .jumper-filter-count {
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-primary);
+}
+</style>
