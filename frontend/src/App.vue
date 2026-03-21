@@ -97,6 +97,8 @@ const jumpers = ref([])
 const tunnels = ref([])
 const jumperSearchQuery = ref('')
 const tunnelSearchQuery = ref('')
+const selectedTunnelJumperId = ref(null)
+const sidebarCollapsed = ref(false)
 const STATE_SYNC_INTERVAL_MS = 5000
 const pendingToggleTunnelIds = new Set()
 let stateSyncTimer = null
@@ -1323,8 +1325,10 @@ watch(
       :app-version="appMeta.version"
       :is-pro="isPro"
       :pro-expiry-label="proExpiryLabel"
+      :collapsed="sidebarCollapsed"
       @switch-page="switchPage"
       @upgrade="openProUpgrade"
+      @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
     />
 
     <section class="content-shell">
@@ -1366,10 +1370,13 @@ watch(
         <TunnelsPage
           v-if="activePage === 'tunnels'"
           :tunnels="filteredTunnels"
+          :jumpers="jumpers"
           :search-query="tunnelSearchQuery"
           :mode-options="modeOptions"
           :get-tunnel-jumper-label="getTunnelJumperLabel"
+          :selected-jumper-id="selectedTunnelJumperId"
           @update-search-query="tunnelSearchQuery = $event"
+          @select-jumper="selectedTunnelJumperId = $event"
           @toggle-tunnel="toggleTunnel"
           @copy-tunnel="copyTunnel"
           @edit-tunnel="editTunnel"
