@@ -234,6 +234,7 @@
         },
         "common": {
             "cancel": "取消",
+            "close": "关闭",
             "confirm": "确认",
             "delete": "删除",
             "edit": "编辑",
@@ -244,7 +245,8 @@
         }
     },
     "config": {
-        "general": "通用",
+        "general": "通用设置",
+        "advancedSettings": "高级设置",
         "language": "语言",
         "languageDesc": "选择偏好语言 / Choose your preferred language",
         "theme": "深色主题",
@@ -255,17 +257,33 @@
         "autoRunExpiredDisabled": "您已开启随系统启动，但当前未升级或授权已过期，已为您关闭该功能。请升级后重新开启。",
         "appInfo": "应用信息",
         "version": "版本",
-        "channel": "通道",
-        "updater": "更新器",
-        "build": "构建",
-        "updateProduct": "更新与产品",
+        "productUpdates": "产品更新",
+        "licenseManagement": "授权管理",
+        "currentVersion": "当前版本",
+        "licenseStatus": "授权状态",
+        "refreshLicenseStatusHint": "点击刷新授权状态",
+        "refreshingLicenseStatus": "刷新中...",
+        "proActivated": "Pro 已激活",
+        "freeVersion": "免费版",
         "checkUpdates": "检查更新",
         "checkingUpdates": "检查中...",
-        "openReleases": "打开 Releases 页面",
+        "updateResultTitle": "检查更新结果",
+        "noUpdatesAvailable": "无可用更新",
+        "latestVersionIs": "发现新版本：{version}",
+        "openDownloadPage": "打开下载页面",
+        "openReleases": "Releases",
         "upgradePro": "升级到 Pro",
         "proExpires": "Pro 到期于 {date}",
-        "manageLicense": "管理授权 (即将来临)",
+        "proExpiresShort": "到期: {date}",
+        "lifetime": "终身",
+        "manageLicense": "管理授权",
         "licenseCode": "注册码",
+        "redeemDialog": {
+            "title": "输入邀请码",
+            "codeLabel": "注册码",
+            "codePlaceholder": "例如：VIP-XXXX-XXXX-XXXX-XXXX",
+            "submitting": "提交中..."
+        },
         "configFile": "配置文件",
         "manageConfig": "配置文件管理",
         "manageConfigDesc": "导出或导入当前配置，或打开包含配置文件的本地目录",
@@ -280,6 +298,17 @@
         "openConfigDirDesc": "打开配置文件所在目录",
         "exportSuccess": "配置导出成功。",
         "importSuccess": "配置导入成功，自动启动的隧道已重新启动。",
-        "importConfirm": "此操作将永久覆盖当前配置（不可恢复），运行中的隧道将被停止并重启。确认继续吗？"
+        "importConfirm": "此操作将永久覆盖当前配置（不可恢复），运行中的隧道将被停止并重启。确认继续吗？",
+        "messages": {
+            "licenseActive": "授权已激活（{expiry}）。",
+            "licenseInactive": "授权尚未激活。",
+            "upToDate": "检查时间 {time}。\n当前版本（{version}）已是最新。",
+            "updateAvailable": "发现新版本 {version}。",
+            "proActive": "Pro 已激活（{expiry}）。",
+            "licenseRedeemed": "授权兑换成功。",
+            "licenseRedeemedWithExpiry": "授权兑换成功（{expiry}）。",
+            "enterLicenseCode": "请输入注册码。",
+            "freePlanRunningLimit": "免费版最多同时运行 {limit} 个 Tunnel，请先停止一个再启动。"
+        }
     }
 }

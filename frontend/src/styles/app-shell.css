@@ -162,6 +162,7 @@
 .content-shell {
   flex: 1;
   min-height: 0;
+  position: relative;
   padding: 0.95rem;
   display: flex;
   flex-direction: column;
@@ -495,6 +496,24 @@
   margin-bottom: 0px;
 }
 
+.config-card .btn-group .btn {
+  font-weight: 400;
+}
+
+.check-updates-btn {
+  --bs-btn-font-weight: 400;
+  font-weight: 400 !important;
+}
+
+.check-updates-btn span {
+  font-weight: 400 !important;
+}
+
+.update-check-dialog-text {
+  font-size: 0.82rem;
+  color: var(--lt-ink);
+}
+
 .config-name {
   font-size: 0.9rem;
   font-weight: 700;
@@ -535,6 +554,72 @@
 .config-message {
   color: var(--lt-muted);
   font-size: 0.83rem;
+}
+
+.toast-config-container {
+  z-index: 1200;
+  width: 100%;
+  pointer-events: none;
+}
+
+.toast-config-item {
+  max-width: min(640px, calc(100% - 1rem));
+  box-shadow: var(--lt-shadow-soft);
+  animation: riseIn 0.18s ease;
+  pointer-events: auto;
+}
+
+.toast-config-item .toast-body {
+  white-space: pre-line;
+}
+
+.license-code-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--lt-border);
+}
+
+.license-code-label {
+  font-size: 0.78rem;
+  color: var(--lt-muted);
+}
+
+.license-code-value {
+  font-size: 0.78rem;
+  color: var(--lt-ink);
+  background: var(--lt-surface-2);
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--lt-radius-sm);
+  font-family: var(--bs-font-monospace);
+}
+
+.pro-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 31px;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--lt-ink);
+  background: transparent;
+  border: 1px solid var(--lt-border-strong);
+  border-radius: 7px;
+  padding: 0.25rem 0.7rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.pro-badge-btn {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.pro-badge-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .overlay {

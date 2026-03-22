@@ -234,6 +234,7 @@
         },
         "common": {
             "cancel": "Cancel",
+            "close": "Close",
             "confirm": "Confirm",
             "delete": "Delete",
             "edit": "Edit",
@@ -244,7 +245,8 @@
         }
     },
     "config": {
-        "general": "General",
+        "general": "General Settings",
+        "advancedSettings": "Advanced Settings",
         "language": "Language",
         "languageDesc": "Choose your preferred language / 选择偏好语言",
         "theme": "Dark Theme",
@@ -255,17 +257,33 @@
         "autoRunExpiredDisabled": "Launch at login was enabled but your license has expired or is inactive. It has been disabled. Upgrade to re-enable.",
         "appInfo": "App Info",
         "version": "Version",
-        "channel": "Channel",
-        "updater": "Updater",
-        "build": "Build",
-        "updateProduct": "Update & Product",
+        "productUpdates": "Product Updates",
+        "licenseManagement": "License Management",
+        "currentVersion": "Current Version",
+        "licenseStatus": "License Status",
+        "refreshLicenseStatusHint": "Click to refresh license status",
+        "refreshingLicenseStatus": "Refreshing...",
+        "proActivated": "Pro Activated",
+        "freeVersion": "Free Version",
         "checkUpdates": "Check for Updates",
         "checkingUpdates": "Checking...",
-        "openReleases": "Open Releases Page",
+        "updateResultTitle": "Update Check Result",
+        "noUpdatesAvailable": "No updates available.",
+        "latestVersionIs": "Latest version: {version}",
+        "openDownloadPage": "Open Download Page",
+        "openReleases": "Releases",
         "upgradePro": "Upgrade to Pro",
         "proExpires": "Pro expires on {date}",
-        "manageLicense": "Manage License (Soon)",
+        "proExpiresShort": "Expires: {date}",
+        "lifetime": "Lifetime",
+        "manageLicense": "Manage License",
         "licenseCode": "License Code",
+        "redeemDialog": {
+            "title": "Enter License Code",
+            "codeLabel": "License Code",
+            "codePlaceholder": "Example: VIP-XXXX-XXXX-XXXX-XXXX",
+            "submitting": "Submitting..."
+        },
         "configFile": "Config File",
         "manageConfig": "Manage Config",
         "manageConfigDesc": "Export or import your config, or open the local config directory",
@@ -280,6 +298,17 @@
         "openConfigDirDesc": "Open the config directory",
         "exportSuccess": "Config exported successfully.",
         "importSuccess": "Config imported. Auto-start tunnels have been restarted.",
-        "importConfirm": "This will permanently overwrite your current config (irreversible). Active tunnels will be stopped and restarted. Continue?"
+        "importConfirm": "This will permanently overwrite your current config (irreversible). Active tunnels will be stopped and restarted. Continue?",
+        "messages": {
+            "licenseActive": "License is active ({expiry}).",
+            "licenseInactive": "License is not activated.",
+            "upToDate": "Checked at {time}.\nCurrent version ({version}) is up to date.",
+            "updateAvailable": "New version {version} available.",
+            "proActive": "Pro is active ({expiry}).",
+            "licenseRedeemed": "License redeemed.",
+            "licenseRedeemedWithExpiry": "License redeemed successfully ({expiry}).",
+            "enterLicenseCode": "Please enter license code.",
+            "freePlanRunningLimit": "Free plan supports up to {limit} running tunnels. Stop one before starting another."
+        }
     }
 }

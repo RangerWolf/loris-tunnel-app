@@ -35,13 +35,17 @@ const props = defineProps({
     type: String,
     default: ''
   },
-  showReleasePageButton: {
-    type: Boolean,
-    default: false
-  },
   isCheckingUpdates: {
     type: Boolean,
     default: false
+  },
+  isRefreshingLicenseStatus: {
+    type: Boolean,
+    default: false
+  },
+  updateCheckDialog: {
+    type: Object,
+    required: true
   }
 })
 
@@ -50,6 +54,8 @@ const emit = defineEmits([
   'check-updates',
   'upgrade',
   'open-release-page',
+  'close-update-check-dialog',
+  'refresh-license-status',
   'set-config-message',
   'reload-state',
   'confirm-action'
@@ -155,6 +161,9 @@ watch(locale, (newLocale) => {
               <select v-model="$i18n.locale" class="form-select form-select-sm">
                 <option value="en">English</option>
                 <option value="zh-CN">简体中文</option>
+                <option value="zh-TW">繁體中文（台灣）</option>
+                <option value="zh-HK">繁體中文（香港）</option>
+                <option value="ru">Русский</option>
               </select>
             </div>
           </div>
@@ -199,7 +208,7 @@ watch(locale, (newLocale) => {
             <div class="btn-group">
               <button
                 type="button"
-                class="btn btn-sm btn-outline-secondary"
+                class="btn btn-sm btn-outline-dark"
                 :disabled="configBusy !== ''"
                 @click="onImportConfig"
               >
@@ -207,7 +216,7 @@ watch(locale, (newLocale) => {
               </button>
               <button
                 type="button"
-                class="btn btn-sm btn-outline-secondary"
+                class="btn btn-sm btn-outline-dark"
                 :disabled="configBusy !== ''"
                 @click="onExportConfig"
               >
@@ -215,7 +224,7 @@ watch(locale, (newLocale) => {
               </button>
               <button
                 type="button"
-                class="btn btn-sm btn-outline-secondary"
+                class="btn btn-sm btn-outline-dark"
                 @click="onOpenConfigDir"
               >
                 {{ t('config.openConfigDirBtn') }}
@@ -224,70 +233,115 @@ watch(locale, (newLocale) => {
           </div>
         </div>
       </div>
+
       <div class="col-12 col-xl-6">
         <div class="panel-card config-card">
           <div class="panel-head mb-2">
-            <h2 class="panel-title mb-0">{{ t('config.appInfo') }}</h2>
+            <h2 class="panel-title mb-0">{{ t('config.advancedSettings') }}</h2>
           </div>
-          <div class="info-list">
-            <div class="info-row">
-              <span>{{ t('config.version') }}</span>
-              <strong>{{ appMeta.version }}</strong>
-            </div>
-            <div class="info-row">
-              <span>{{ t('config.channel') }}</span>
-              <strong>{{ appMeta.channel }}</strong>
-            </div>
-            <div class="info-row">
-              <span>{{ t('config.updater') }}</span>
-              <strong>{{ appMeta.updater }}</strong>
-            </div>
-            <div class="info-row">
-              <span>{{ t('config.build') }}</span>
-              <strong>{{ appMeta.build }}</strong>
-            </div>
-          </div>
-        </div>
-      </div>
 
-
-      <div class="col-12">
-        <div class="panel-card">
-          <div class="panel-head mb-2">
-            <h2 class="panel-title mb-0">{{ t('config.updateProduct') }}</h2>
-          </div>
-          <div class="d-flex flex-wrap gap-2">
+          <div class="config-row align-items-center">
+            <div>
+              <div class="config-name">{{ t('config.currentVersion') }}</div>
+              <div class="config-desc">{{ appMeta.version }}</div>
+            </div>
             <button
               type="button"
-              class="btn btn-outline-secondary position-relative"
+              class="btn btn-sm btn-outline-dark position-relative check-updates-btn"
               :disabled="isCheckingUpdates"
               @click="$emit('check-updates')"
             >
               <span :class="{ 'invisible': isCheckingUpdates }">{{ t('config.checkUpdates') }}</span>
-              <span v-if="isCheckingUpdates" class="position-absolute top-50 start-50 translate-middle text-nowrap">
+              <span v-if="isCheckingUpdates" class="position-absolute top-50 start-50 translate-middle text-nowrap small">
                 {{ t('config.checkingUpdates') }}
               </span>
             </button>
+          </div>
+
+          <div class="config-row align-items-center">
+            <div>
+              <div class="config-name">{{ t('config.licenseStatus') }}</div>
+              <div class="config-desc">
+                <span v-if="isPro">{{ t('config.licenseCode') }}: {{ licenseCode }}</span>
+                <span v-else class="text-muted">{{ t('config.freeVersion') }}</span>
+              </div>
+            </div>
+            <div class="btn-group">
+              <button
+                v-if="!isPro"
+                type="button"
+                class="btn btn-sm btn-outline-dark"
+                @click="$emit('upgrade')"
+              >
+                {{ t('config.upgradePro') }}
+              </button>
+              <button
+                v-else
+                type="button"
+                class="pro-badge pro-badge-btn"
+                :disabled="isRefreshingLicenseStatus"
+                :title="t('config.refreshLicenseStatusHint')"
+                @click="$emit('refresh-license-status')"
+              >
+                {{ isRefreshingLicenseStatus ? t('config.refreshingLicenseStatus') : `Pro · ${proExpiryLabel}` }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <div
+    v-if="updateCheckDialog.visible"
+    class="modal fade show"
+    style="display: block"
+    tabindex="-1"
+    aria-modal="true"
+    role="dialog"
+  >
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content compact-dialog update-check-dialog-content">
+        <div class="modal-header dialog-head">
+          <h3 class="modal-title dialog-title">{{ t('config.updateResultTitle') }}</h3>
+          <button
+            type="button"
+            class="btn-close"
+            :aria-label="t('app.common.close')"
+            @click="$emit('close-update-check-dialog')"
+          />
+        </div>
+        <div class="modal-body dialog-body">
+          <p v-if="updateCheckDialog.mode === 'upToDate'" class="mb-0 update-check-dialog-text">
+            {{ t('config.noUpdatesAvailable') }}
+          </p>
+          <p v-else-if="updateCheckDialog.mode === 'updateAvailable'" class="mb-0 update-check-dialog-text">
+            {{ t('config.latestVersionIs', { version: updateCheckDialog.latestVersion }) }}
+          </p>
+          <p v-else class="mb-0 update-check-dialog-text">{{ updateCheckDialog.message }}</p>
+        </div>
+        <div class="modal-footer dialog-actions">
+          <div class="dialog-right-actions">
             <button
-              v-if="showReleasePageButton"
+              v-if="updateCheckDialog.mode === 'updateAvailable'"
               type="button"
-              class="btn btn-outline-primary"
-              @click="$emit('open-release-page')"
+              class="btn btn-primary"
+              @click="$emit('open-release-page'); $emit('close-update-check-dialog')"
             >
-              {{ t('config.openReleases') }}
+              {{ t('config.openDownloadPage') }}
             </button>
-            <button v-if="!isPro" type="button" class="btn btn-primary" @click="$emit('upgrade')">{{ t('config.upgradePro') }}</button>
-            <span v-else class="pro-expiry-chip" :title="t('config.proExpires', { date: proExpiryLabel })">
-              {{ t('config.proExpires', { date: proExpiryLabel }) }}
-            </span>
-            <button type="button" class="btn btn-outline-secondary" disabled>
-              {{ t('config.manageLicense') }}
+            <button
+              type="button"
+              class="btn btn-outline-secondary"
+              @click="$emit('close-update-check-dialog')"
+            >
+              {{ t('app.common.close') }}
             </button>
           </div>
-          <p v-if="licenseCode" class="config-message mb-0 mt-2">{{ t('config.licenseCode') }}: {{ licenseCode }}</p>
-          <p v-if="configMessage" class="config-message mb-0 mt-3">{{ configMessage }}</p>
         </div>
       </div>
     </div>
-  </section>
+  </div>
+  <div v-if="updateCheckDialog.visible" class="modal-backdrop fade show" />
 </template>

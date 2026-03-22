@@ -1,0 +1,314 @@
+{
+    "app": {
+        "title": "Loris Tunnel",
+        "sidebar": {
+            "subtitle": "SSH 隧道管理",
+            "overview": "概覽",
+            "overviewSubtitle": "核心運行狀態與近期活動",
+            "jumpers": "跳板機",
+            "jumpersSubtitle": "管理 SSH 跳板機設定",
+            "tunnels": "隧道",
+            "tunnelsSubtitle": "建立並管理 SSH 隧道",
+            "logs": "日誌",
+            "logsSubtitle": "檢視近期操作日誌",
+            "config": "設定",
+            "configSubtitle": "主題、版本、更新與產品入口",
+            "upgrade": "升級"
+        },
+        "header": {
+            "newJumper": "+ 新建跳板機",
+            "newTunnel": "+ 新建隧道",
+            "importTunnel": "匯入"
+        },
+        "overview": {
+            "totalTunnels": "隧道總數",
+            "running": "運行中",
+            "stopped": "已停止",
+            "autoStart": "自動啟動",
+            "activeTunnels": "活躍隧道",
+            "recentActivity": "近期活動",
+            "collapsePanel": "收合面板",
+            "expandPanel": "展開面板",
+            "noRunningTunnels": "暫無運行中的隧道",
+            "table": {
+                "name": "名稱",
+                "route": "路由",
+                "jumper": "跳板機",
+                "action": "操作"
+            },
+            "actions": {
+                "stopTunnel": "停止"
+            },
+            "pagination": {
+                "prev": "上一頁",
+                "next": "下一頁",
+                "pageInfo": "{current}/{total}"
+            }
+        },
+        "jumpers": {
+            "title": "所有跳板機",
+            "noJumpers": "暫無跳板機",
+            "table": {
+                "name": "名稱",
+                "connection": "連線資訊",
+                "auth": "認證",
+                "notes": "備註",
+                "action": "操作"
+            },
+            "actions": {
+                "copy": "複製",
+                "edit": "編輯",
+                "delete": "刪除"
+            }
+        },
+        "tunnels": {
+            "title": "所有隧道",
+            "noTunnels": "暫無隧道",
+            "errorReason": "錯誤原因",
+            "table": {
+                "name": "名稱",
+                "mode": "模式",
+                "route": "路由",
+                "jumper": "跳板機",
+                "status": "狀態",
+                "latency": "延遲",
+                "action": "操作"
+            },
+            "latency": {
+                "measuring": "測量中..."
+            },
+            "actions": {
+                "stop": "停止",
+                "start": "啟動",
+                "busy": "啟動中",
+                "retry": "重試",
+                "more": "更多",
+                "copy": "複製",
+                "copyError": "複製錯誤",
+                "copied": "已複製",
+                "expandError": "展開錯誤詳情",
+                "collapseError": "收合錯誤詳情",
+                "edit": "編輯",
+                "delete": "刪除"
+            },
+            "status": {
+                "running": "運行中",
+                "stopped": "已停止",
+                "busy": "處理中",
+                "error": "錯誤"
+            }
+        },
+        "confirmations": {
+            "deleteTunnel": "確認刪除隧道「{name}」嗎？",
+            "deleteJumper": "確認刪除跳板機「{name}」嗎？",
+            "deleteJumperBlocked": "無法刪除跳板機「{name}」，它正被 {count} 條隧道使用。"
+        },
+        "logs": {
+            "title": "操作日誌",
+            "levels": {
+                "all": "全部",
+                "info": "資訊",
+                "warn": "警告",
+                "error": "錯誤"
+            },
+            "table": {
+                "time": "時間",
+                "level": "級別",
+                "message": "內容"
+            },
+            "noLogs": "該級別暫無日誌"
+        },
+        "modals": {
+            "jumper": {
+                "newTitle": "新建跳板機",
+                "editTitle": "編輯跳板機",
+                "basicSettings": "基本設定",
+                "advancedOptions": "進階選項",
+                "name": "名稱",
+                "user": "使用者名稱",
+                "host": "主機位址",
+                "port": "連接埠",
+                "authMethod": "認證方式",
+                "sshKeyFile": "SSH 金鑰檔案",
+                "browse": "瀏覽",
+                "password": "密碼",
+                "notes": "備註",
+                "keepAliveInterval": "KeepAlive 間隔 (ms)",
+                "keepAliveIntervalTooltip": "0 表示停用。大於 0 時，依該毫秒間隔傳送 keepalive 探活。",
+                "timeout": "連線逾時 (ms)",
+                "bypassHostCheck": "略過主機檢查",
+                "testConnection": "測試連線",
+                "testing": "測試中...",
+                "sshAgentNote": "SSH Agent 會使用系統中已載入的私鑰，不需要填寫 key file 或 password。",
+                "agentSocketPath": "Agent Socket 路徑（選填）",
+                "agentSocketPlaceholder": "~/.ssh/ssh-agent.sock",
+                "agentSocketNote": "選填。填寫後會優先使用該 socket，而非 SSH_AUTH_SOCK。",
+                "keyFileNote": "可手動輸入路徑，亦可點選 Browse 選擇檔案。",
+                "passwordPlaceholder": "輸入密碼",
+                "passwordOptionalPlaceholder": "選填（金鑰密語）",
+                "keyPathPlaceholder": "~/.ssh/id_rsa",
+                "bypassTooltip": "繞過 SSH host fingerprint 檢查（僅在受信任環境下建議開啟）。"
+            },
+            "importTunnel": {
+                "title": "匯入隧道",
+                "source": "來源",
+                "sshCommand": "SSH 指令",
+                "sshCommandPlaceholder": "在此貼上 SSH 指令...\n範例: ssh -N -L 3307:remote:3306 -i key.pem user{'@'}host",
+                "parseCmd": "解析指令",
+                "parsedTunnels": "已解析的隧道",
+                "tunnelName": "隧道名稱",
+                "mode": "模式",
+                "route": "路由",
+                "importBtn": "匯入",
+                "jumperSectionTitle": "跳板機處理",
+                "parsedTargetLabel": "解析出的目標：{target}",
+                "jumperAction": "處理方式",
+                "useExistingJumper": "使用既有跳板機",
+                "createNewJumper": "新建跳板機",
+                "existingJumper": "既有跳板機",
+                "defaultMatchedJumper": "已自動選取相符的既有跳板機。",
+                "duplicateExisting": "與既有隧道重複，預設不勾選。",
+                "duplicateBatch": "與本次解析結果重複，預設不勾選。",
+                "warningInvalidLocal": "發現 {count} 條無效的 -L 規則，已忽略。",
+                "warningInvalidRemote": "發現 {count} 條無效的 -R 規則，已忽略。",
+                "warningInvalidDynamic": "發現無效的 -D 規則，已忽略。",
+                "warningInvalidTarget": "偵測到包含 {'@'} 的目標參數，但格式無效，無法解析 user{'@'}host。",
+                "warningMissingTarget": "未辨識到有效的 user{'@'}host，已阻止匯入。",
+                "warningDuplicateSkipped": "發現 {count} 條重複隧道，已預設取消勾選。",
+                "statusSuccess": "成功",
+                "statusError": "錯誤",
+                "errorDuplicateExisting": "與既有隧道路由重複。",
+                "errorDuplicateBatch": "與本次解析結果中其他隧道路由重複。",
+                "errorMissingTarget": "SSH 指令缺少有效的 user{'@'}host，已阻止匯入。",
+                "errorNoJumper": "沒有可用跳板機。請在指令中帶上 user{'@'}host，或先建立跳板機。"
+            },
+            "tunnel": {
+                "newTitle": "新建隧道",
+                "editTitle": "編輯隧道",
+                "name": "名稱",
+                "mode": "模式",
+                "localHost": "本機主機",
+                "localPort": "本機連接埠",
+                "remoteHost": "遠端主機",
+                "remotePort": "遠端連接埠",
+                "jumpers": "跳板機",
+                "selectPrimaryJumperPlaceholder": "選擇主跳板機（#1）",
+                "primaryJumperHint": "目前選擇的主跳板機即鏈路第 #1 跳。",
+                "addMoreJumpers": "新增更多跳板機",
+                "hideMoreJumpers": "收合額外跳板機",
+                "jumpersHint": "點選 + 追加跳板機，隧道會依下方順序逐跳連線。",
+                "selectAdditionalJumperPlaceholder": "選擇要追加的跳板機",
+                "selectJumperPlaceholder": "選擇要追加的跳板機",
+                "addJumper": "新增跳板機",
+                "selectedJumpers": "已選擇的跳板機",
+                "selectedJumpersOrderTooltip": "隧道會依列表順序從 #1 到 #N 逐跳連線。可使用上下按鈕調整順序。",
+                "noSelectedJumpers": "尚未選擇跳板機。",
+                "moveJumperUp": "上移跳板機",
+                "moveJumperDown": "下移跳板機",
+                "removeJumper": "移除跳板機",
+                "appendNewJumper": "快速建立並追加一個新跳板機",
+                "quickCreateJumper": "快速建立跳板機",
+                "description": "描述",
+                "autoStart": "隨應用程式自動啟動",
+                "saveTunnel": "儲存隧道",
+                "testConnection": "測試連線",
+                "testing": "測試中...",
+                "testPassedWithLatency": "連線測試通過，SSH 延遲：{latency}。"
+            }
+        },
+        "options": {
+            "mode": {
+                "local": "本機轉送 (Local)",
+                "remote": "遠端轉送 (Remote)",
+                "dynamic": "動態 SOCKS5"
+            },
+            "auth": {
+                "password": "密碼 (Password)",
+                "sshKey": "SSH 金鑰 (Key)",
+                "sshAgent": "SSH Agent",
+                "unknown": "未知"
+            },
+            "jumper": {
+                "unknown": "未知跳板機"
+            }
+        },
+        "common": {
+            "cancel": "取消",
+            "close": "關閉",
+            "confirm": "確認",
+            "delete": "刪除",
+            "edit": "編輯",
+            "save": "儲存",
+            "action": "操作",
+            "searchPlaceholder": "搜尋...",
+            "clearSearch": "清除搜尋"
+        }
+    },
+    "config": {
+        "general": "一般設定",
+        "advancedSettings": "進階設定",
+        "language": "語言",
+        "languageDesc": "選擇偏好語言 / Choose your preferred language",
+        "theme": "深色主題",
+        "themeDesc": "切換明暗主題",
+        "autoRun": "隨系統啟動",
+        "autoRunDesc": "登入時自動啟動 Loris Tunnel（僅 Pro）",
+        "autoRunProRequired": "隨系統啟動為 Pro 功能，請升級後使用。",
+        "autoRunExpiredDisabled": "您已開啟隨系統啟動，但目前未升級或授權已過期，已為您關閉該功能。請升級後重新開啟。",
+        "appInfo": "應用程式資訊",
+        "version": "版本",
+        "productUpdates": "產品更新",
+        "licenseManagement": "授權管理",
+        "currentVersion": "目前版本",
+        "licenseStatus": "授權狀態",
+        "refreshLicenseStatusHint": "點選重新整理授權狀態",
+        "refreshingLicenseStatus": "重新整理中...",
+        "proActivated": "Pro 已啟用",
+        "freeVersion": "免費版",
+        "checkUpdates": "檢查更新",
+        "checkingUpdates": "檢查中...",
+        "updateResultTitle": "檢查更新結果",
+        "noUpdatesAvailable": "無可用更新",
+        "latestVersionIs": "發現新版本：{version}",
+        "openDownloadPage": "開啟下載頁面",
+        "openReleases": "Releases",
+        "upgradePro": "升級到 Pro",
+        "proExpires": "Pro 到期於 {date}",
+        "proExpiresShort": "到期: {date}",
+        "lifetime": "終身",
+        "manageLicense": "管理授權",
+        "licenseCode": "註冊碼",
+        "redeemDialog": {
+            "title": "輸入邀請碼",
+            "codeLabel": "註冊碼",
+            "codePlaceholder": "例如：VIP-XXXX-XXXX-XXXX-XXXX",
+            "submitting": "提交中..."
+        },
+        "configFile": "設定檔",
+        "manageConfig": "設定檔管理",
+        "manageConfigDesc": "匯出或匯入目前設定，或開啟包含設定檔的本機目錄",
+        "exportConfig": "匯出設定",
+        "exportConfigBtn": "匯出",
+        "exportConfigDesc": "將 config.toml 備份到指定位置",
+        "importConfig": "匯入設定",
+        "importConfigBtn": "匯入",
+        "importConfigDesc": "從 TOML 檔案載入設定（會停止並重啟隧道）",
+        "openConfigDir": "開啟設定目錄",
+        "openConfigDirBtn": "開啟目錄",
+        "openConfigDirDesc": "開啟設定檔所在目錄",
+        "exportSuccess": "設定匯出成功。",
+        "importSuccess": "設定匯入成功，自動啟動的隧道已重新啟動。",
+        "importConfirm": "此操作將永久覆寫目前設定（無法復原），運行中的隧道將被停止並重啟。確認繼續嗎？",
+        "messages": {
+            "licenseActive": "授權已啟用（{expiry}）。",
+            "licenseInactive": "授權尚未啟用。",
+            "upToDate": "檢查時間 {time}。\n目前版本（{version}）已是最新。",
+            "updateAvailable": "發現新版本 {version}。",
+            "proActive": "Pro 已啟用（{expiry}）。",
+            "licenseRedeemed": "授權兌換成功。",
+            "licenseRedeemedWithExpiry": "授權兌換成功（{expiry}）。",
+            "enterLicenseCode": "請輸入註冊碼。",
+            "freePlanRunningLimit": "免費版最多同時運行 {limit} 個 Tunnel，請先停止一個再啟動。"
+        }
+    }
+}

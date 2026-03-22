@@ -1,0 +1,314 @@
+{
+    "app": {
+        "title": "Loris Tunnel",
+        "sidebar": {
+            "subtitle": "Менеджер SSH-туннелей",
+            "overview": "Обзор",
+            "overviewSubtitle": "Основное состояние и недавняя активность",
+            "jumpers": "Прыжковые серверы",
+            "jumpersSubtitle": "Управление конфигурациями SSH jump host",
+            "tunnels": "Туннели",
+            "tunnelsSubtitle": "Создание и управление SSH-туннелями",
+            "logs": "Журнал",
+            "logsSubtitle": "Просмотр последних операций",
+            "config": "Настройки",
+            "configSubtitle": "Тема, версия, обновления и продукт",
+            "upgrade": "Обновить"
+        },
+        "header": {
+            "newJumper": "+ Новый прыжковый сервер",
+            "newTunnel": "+ Новый туннель",
+            "importTunnel": "Импорт"
+        },
+        "overview": {
+            "totalTunnels": "Всего туннелей",
+            "running": "Запущено",
+            "stopped": "Остановлено",
+            "autoStart": "Автозапуск",
+            "activeTunnels": "Активные туннели",
+            "recentActivity": "Недавняя активность",
+            "collapsePanel": "Свернуть панель",
+            "expandPanel": "Развернуть панель",
+            "noRunningTunnels": "Нет запущенных туннелей",
+            "table": {
+                "name": "Имя",
+                "route": "Маршрут",
+                "jumper": "Прыжковый сервер",
+                "action": "Действие"
+            },
+            "actions": {
+                "stopTunnel": "Остановить"
+            },
+            "pagination": {
+                "prev": "Предыдущая страница",
+                "next": "Следующая страница",
+                "pageInfo": "{current}/{total}"
+            }
+        },
+        "jumpers": {
+            "title": "Все прыжковые серверы",
+            "noJumpers": "Прыжковых серверов пока нет",
+            "table": {
+                "name": "Имя",
+                "connection": "Подключение",
+                "auth": "Аутентификация",
+                "notes": "Заметки",
+                "action": "Действие"
+            },
+            "actions": {
+                "copy": "Копировать",
+                "edit": "Изменить",
+                "delete": "Удалить"
+            }
+        },
+        "tunnels": {
+            "title": "Все туннели",
+            "noTunnels": "Туннелей пока нет",
+            "errorReason": "Ошибка",
+            "table": {
+                "name": "Имя",
+                "mode": "Режим",
+                "route": "Маршрут",
+                "jumper": "Прыжковый сервер",
+                "status": "Статус",
+                "latency": "Задержка",
+                "action": "Действие"
+            },
+            "latency": {
+                "measuring": "Измерение..."
+            },
+            "actions": {
+                "stop": "Остановить",
+                "start": "Запустить",
+                "busy": "Запуск...",
+                "retry": "Повторить",
+                "more": "Ещё",
+                "copy": "Копировать",
+                "copyError": "Копировать ошибку",
+                "copied": "Скопировано",
+                "expandError": "Показать полный текст ошибки",
+                "collapseError": "Скрыть полный текст ошибки",
+                "edit": "Изменить",
+                "delete": "Удалить"
+            },
+            "status": {
+                "running": "Работает",
+                "stopped": "Остановлен",
+                "busy": "Занят",
+                "error": "Ошибка"
+            }
+        },
+        "confirmations": {
+            "deleteTunnel": "Удалить туннель «{name}»?",
+            "deleteJumper": "Удалить прыжковый сервер «{name}»?",
+            "deleteJumperBlocked": "Нельзя удалить «{name}»: используется в {count} туннеле(ях)."
+        },
+        "logs": {
+            "title": "Журнал операций",
+            "levels": {
+                "all": "Все",
+                "info": "Инфо",
+                "warn": "Предупреждения",
+                "error": "Ошибки"
+            },
+            "table": {
+                "time": "Время",
+                "level": "Уровень",
+                "message": "Сообщение"
+            },
+            "noLogs": "Для этого уровня записей нет"
+        },
+        "modals": {
+            "jumper": {
+                "newTitle": "Новый прыжковый сервер",
+                "editTitle": "Изменить прыжковый сервер",
+                "basicSettings": "Основные параметры",
+                "advancedOptions": "Дополнительно",
+                "name": "Имя",
+                "user": "Пользователь",
+                "host": "Хост",
+                "port": "Порт",
+                "authMethod": "Способ входа",
+                "sshKeyFile": "Файл SSH-ключа",
+                "browse": "Обзор",
+                "password": "Пароль",
+                "notes": "Заметки",
+                "keepAliveInterval": "Интервал KeepAlive (мс)",
+                "keepAliveIntervalTooltip": "0 — отключено. Положительное значение — интервал keepalive в миллисекундах.",
+                "timeout": "Таймаут подключения (мс)",
+                "bypassHostCheck": "Пропуск проверки хоста",
+                "testConnection": "Проверить подключение",
+                "testing": "Проверка...",
+                "sshAgentNote": "SSH Agent использует ключи из системы; файл ключа или пароль не нужны.",
+                "agentSocketPath": "Путь к сокету Agent (необязательно)",
+                "agentSocketPlaceholder": "~/.ssh/ssh-agent.sock",
+                "agentSocketNote": "Необязательно. Если указан, используется вместо SSH_AUTH_SOCK.",
+                "keyFileNote": "Введите путь вручную или нажмите «Обзор».",
+                "passwordPlaceholder": "Введите пароль",
+                "passwordOptionalPlaceholder": "Необязательно (пароль ключа)",
+                "keyPathPlaceholder": "~/.ssh/id_rsa",
+                "bypassTooltip": "Пропустить проверку отпечатка SSH-хоста (только в доверенной среде)."
+            },
+            "importTunnel": {
+                "title": "Импорт туннелей",
+                "source": "Источник",
+                "sshCommand": "Команда SSH",
+                "sshCommandPlaceholder": "Вставьте команду SSH...\nПример: ssh -N -L 3307:remote:3306 -i key.pem user{'@'}host",
+                "parseCmd": "Разобрать команду",
+                "parsedTunnels": "Разобранные туннели",
+                "tunnelName": "Имя туннеля",
+                "mode": "Режим",
+                "route": "Маршрут",
+                "importBtn": "Импорт",
+                "jumperSectionTitle": "Прыжковый сервер",
+                "parsedTargetLabel": "Разобранная цель: {target}",
+                "jumperAction": "Действие",
+                "useExistingJumper": "Использовать существующий",
+                "createNewJumper": "Создать новый",
+                "existingJumper": "Существующий сервер",
+                "defaultMatchedJumper": "По умолчанию выбран подходящий существующий сервер.",
+                "duplicateExisting": "Дубликат существующего туннеля; по умолчанию снято.",
+                "duplicateBatch": "Дубликат в текущем разборе; по умолчанию снято.",
+                "warningInvalidLocal": "Проигнорировано неверных правил -L: {count}.",
+                "warningInvalidRemote": "Проигнорировано неверных правил -R: {count}.",
+                "warningInvalidDynamic": "Неверное правило -D проигнорировано.",
+                "warningInvalidTarget": "Найден токен с {'@'}, но формат неверный; не удалось разобрать user{'@'}host.",
+                "warningMissingTarget": "Нет корректного user{'@'}host; импорт заблокирован.",
+                "warningDuplicateSkipped": "Обнаружено дубликатов туннелей: {count}; снято с выбора.",
+                "statusSuccess": "Успех",
+                "statusError": "Ошибка",
+                "errorDuplicateExisting": "Маршрут совпадает с существующим туннелем.",
+                "errorDuplicateBatch": "Дубликат маршрута в этом разборе.",
+                "errorMissingTarget": "В команде SSH нет корректного user{'@'}host; импорт заблокирован.",
+                "errorNoJumper": "Нет доступного прыжкового сервера. Укажите user{'@'}host в команде или создайте сервер."
+            },
+            "tunnel": {
+                "newTitle": "Новый туннель",
+                "editTitle": "Изменить туннель",
+                "name": "Имя",
+                "mode": "Режим",
+                "localHost": "Локальный хост",
+                "localPort": "Локальный порт",
+                "remoteHost": "Удалённый хост",
+                "remotePort": "Удалённый порт",
+                "jumpers": "Прыжковые серверы",
+                "selectPrimaryJumperPlaceholder": "Выберите основной сервер (#1)",
+                "primaryJumperHint": "Выбранный основной сервер — первый прыжок (#1) в цепочке.",
+                "addMoreJumpers": "Добавить серверы",
+                "hideMoreJumpers": "Скрыть дополнительные",
+                "jumpersHint": "Нажмите + чтобы добавить серверы; туннель идёт в указанном порядке.",
+                "selectAdditionalJumperPlaceholder": "Выберите сервер для добавления",
+                "selectJumperPlaceholder": "Выберите сервер для добавления",
+                "addJumper": "Добавить сервер",
+                "selectedJumpers": "Выбранные серверы",
+                "selectedJumpersOrderTooltip": "Подключение от #1 до #N по списку. Кнопки вверх/вниз меняют порядок.",
+                "noSelectedJumpers": "Серверы ещё не выбраны.",
+                "moveJumperUp": "Выше",
+                "moveJumperDown": "Ниже",
+                "removeJumper": "Убрать сервер",
+                "appendNewJumper": "Быстро создать и добавить сервер",
+                "quickCreateJumper": "Быстрое создание",
+                "description": "Описание",
+                "autoStart": "Автозапуск с приложением",
+                "saveTunnel": "Сохранить туннель",
+                "testConnection": "Проверить подключение",
+                "testing": "Проверка...",
+                "testPassedWithLatency": "Проверка успешна. Задержка SSH: {latency}."
+            }
+        },
+        "options": {
+            "mode": {
+                "local": "Локальная переадресация",
+                "remote": "Удалённая переадресация",
+                "dynamic": "Динамический SOCKS5"
+            },
+            "auth": {
+                "password": "Пароль",
+                "sshKey": "SSH-ключ",
+                "sshAgent": "SSH Agent",
+                "unknown": "Неизвестно"
+            },
+            "jumper": {
+                "unknown": "Неизвестный сервер"
+            }
+        },
+        "common": {
+            "cancel": "Отмена",
+            "close": "Закрыть",
+            "confirm": "Подтвердить",
+            "delete": "Удалить",
+            "edit": "Изменить",
+            "save": "Сохранить",
+            "action": "Действие",
+            "searchPlaceholder": "Поиск...",
+            "clearSearch": "Очистить поиск"
+        }
+    },
+    "config": {
+        "general": "Общие",
+        "advancedSettings": "Дополнительно",
+        "language": "Язык",
+        "languageDesc": "Выберите язык интерфейса / Choose your preferred language",
+        "theme": "Тёмная тема",
+        "themeDesc": "Переключение светлой и тёмной темы",
+        "autoRun": "Запуск при входе",
+        "autoRunDesc": "Запускать Loris Tunnel при входе в систему (только Pro)",
+        "autoRunProRequired": "Автозапуск при входе — функция Pro. Обновитесь для включения.",
+        "autoRunExpiredDisabled": "Автозапуск был включён, но лицензия неактивна или истекла. Функция отключена. Обновитесь для повторного включения.",
+        "appInfo": "О приложении",
+        "version": "Версия",
+        "productUpdates": "Обновления продукта",
+        "licenseManagement": "Лицензия",
+        "currentVersion": "Текущая версия",
+        "licenseStatus": "Статус лицензии",
+        "refreshLicenseStatusHint": "Нажмите для обновления статуса",
+        "refreshingLicenseStatus": "Обновление...",
+        "proActivated": "Pro активирован",
+        "freeVersion": "Бесплатная версия",
+        "checkUpdates": "Проверить обновления",
+        "checkingUpdates": "Проверка...",
+        "updateResultTitle": "Результат проверки",
+        "noUpdatesAvailable": "Нет доступных обновлений.",
+        "latestVersionIs": "Доступна новая версия: {version}",
+        "openDownloadPage": "Открыть страницу загрузки",
+        "openReleases": "Релизы",
+        "upgradePro": "Перейти на Pro",
+        "proExpires": "Pro действует до {date}",
+        "proExpiresShort": "До: {date}",
+        "lifetime": "Навсегда",
+        "manageLicense": "Управление лицензией",
+        "licenseCode": "Код лицензии",
+        "redeemDialog": {
+            "title": "Введите код лицензии",
+            "codeLabel": "Код лицензии",
+            "codePlaceholder": "Например: VIP-XXXX-XXXX-XXXX-XXXX",
+            "submitting": "Отправка..."
+        },
+        "configFile": "Файл конфигурации",
+        "manageConfig": "Управление конфигурацией",
+        "manageConfigDesc": "Экспорт, импорт или открытие папки с конфигурацией",
+        "exportConfig": "Экспорт конфигурации",
+        "exportConfigBtn": "Экспорт",
+        "exportConfigDesc": "Сохранить резервную копию config.toml",
+        "importConfig": "Импорт конфигурации",
+        "importConfigBtn": "Импорт",
+        "importConfigDesc": "Загрузить из TOML (остановит и перезапустит туннели)",
+        "openConfigDir": "Открыть папку конфигурации",
+        "openConfigDirBtn": "Открыть папку",
+        "openConfigDirDesc": "Открыть каталог с конфигурацией",
+        "exportSuccess": "Конфигурация успешно экспортирована.",
+        "importSuccess": "Конфигурация импортирована. Автозапуск туннелей перезапущен.",
+        "importConfirm": "Текущая конфигурация будет безвозвратно перезаписана. Активные туннели остановятся и перезапустятся. Продолжить?",
+        "messages": {
+            "licenseActive": "Лицензия активна ({expiry}).",
+            "licenseInactive": "Лицензия не активирована.",
+            "upToDate": "Проверено: {time}.\nТекущая версия ({version}) актуальна.",
+            "updateAvailable": "Доступна новая версия {version}.",
+            "proActive": "Pro активен ({expiry}).",
+            "licenseRedeemed": "Лицензия активирована.",
+            "licenseRedeemedWithExpiry": "Лицензия активирована ({expiry}).",
+            "enterLicenseCode": "Введите код лицензии.",
+            "freePlanRunningLimit": "В бесплатной версии одновременно может работать не более {limit} туннелей. Остановите один перед запуском нового."
+        }
+    }
+}

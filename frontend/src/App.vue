@@ -59,18 +59,24 @@ const theme = ref(savedTheme === 'dark' ? 'dark' : 'light')
 const activePage = ref('overview')
 const selectedLogLevel = ref('all')
 const configMessage = ref('')
-const showReleasePageButton = ref(false)
 const DEFAULT_RELEASES_PAGE_URL = 'https://github.com/RangerWolf/loris-tunnel-app/releases'
 const releasePageUrl = ref(DEFAULT_RELEASES_PAGE_URL)
 const showOverviewActive = ref(true)
 const showOverviewActivity = ref(true)
 const isCheckingUpdates = ref(false)
+const isRefreshingLicenseStatus = ref(false)
+const updateCheckDialog = reactive({
+  visible: false,
+  mode: 'idle',
+  latestVersion: '',
+  message: ''
+})
+const showConfigToast = ref(false)
+const CONFIG_TOAST_DURATION_MS = 3800
+let configToastTimer = null
 
 const appMeta = reactive({
-  version: '0.20.1-alpha',
-  channel: 'Community',
-  updater: 'GitHub Releases API (via Go backend)',
-  build: '2026-03-14'
+  version: '0.20.1-alpha'
 })
 const proLicense = reactive({
   isPro: false,
@@ -91,6 +97,21 @@ watch(theme, (newTheme) => {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem('lt.theme', newTheme)
   }
+})
+
+watch(configMessage, (message) => {
+  if (!message) {
+    hideConfigToast()
+    return
+  }
+  showConfigToast.value = true
+  if (configToastTimer !== null) {
+    window.clearTimeout(configToastTimer)
+  }
+  configToastTimer = window.setTimeout(() => {
+    showConfigToast.value = false
+    configToastTimer = null
+  }, CONFIG_TOAST_DURATION_MS)
 })
 
 const jumpers = ref([])
@@ -212,7 +233,7 @@ const inlineJumperNeedsKeyFile = computed(() => authNeedsKeyFile(inlineJumperFor
 const isPro = computed(() => proLicense.isPro)
 const proExpiryLabel = computed(() => {
   if (!proLicense.isPro) return '--'
-  if (proLicense.isLifetime) return locale.value === 'zh-CN' ? '终身' : 'Lifetime'
+  if (proLicense.isLifetime) return t('config.lifetime')
   return formatDateTime(proLicense.expiresAt)
 })
 
@@ -282,7 +303,6 @@ function applyLicenseState({ active = false, expire_time = null, is_lifetime = f
   proLicense.expiresAt = expire_time ? String(expire_time) : ''
   proLicense.isLifetime = !!is_lifetime
   proLicense.code = code ? String(code) : ''
-  appMeta.channel = proLicense.isPro ? 'Pro' : 'Community'
 }
 
 function openExternalUrl(url) {
@@ -461,6 +481,14 @@ function setConfigMessage(msg) {
   configMessage.value = msg || ''
 }
 
+function hideConfigToast() {
+  showConfigToast.value = false
+  if (configToastTimer !== null) {
+    window.clearTimeout(configToastTimer)
+    configToastTimer = null
+  }
+}
+
 async function refreshLicenseStatus(options = {}) {
   const { silent = false } = options
   try {
@@ -468,10 +496,10 @@ async function refreshLicenseStatus(options = {}) {
     applyLicenseState(status || {})
     if (!silent) {
       if (proLicense.isPro) {
-        configMessage.value = `License is active (${proExpiryLabel.value}).`
+        configMessage.value = t('config.messages.licenseActive', { expiry: proExpiryLabel.value })
         logEvent('info', `License status refreshed: active (${proExpiryLabel.value})`)
       } else {
-        configMessage.value = 'License is not activated.'
+        configMessage.value = t('config.messages.licenseInactive')
         logEvent('info', 'License status refreshed: inactive')
       }
     }
@@ -483,6 +511,16 @@ async function refreshLicenseStatus(options = {}) {
       logEvent('error', message)
     }
     return false
+  }
+}
+
+async function refreshLicenseStatusFromConfig() {
+  if (isRefreshingLicenseStatus.value) return
+  isRefreshingLicenseStatus.value = true
+  try {
+    await refreshLicenseStatus()
+  } finally {
+    isRefreshingLicenseStatus.value = false
   }
 }
 
@@ -502,25 +540,31 @@ async function checkForUpdates() {
     const result = await CheckForUpdatesAPI(appMeta.version)
 
     if (!result?.hasUpdate) {
-      showReleasePageButton.value = false
       releasePageUrl.value = DEFAULT_RELEASES_PAGE_URL
-      configMessage.value = `Checked at ${nowLabel()}. Current version (${appMeta.version}) is up to date.`
+      updateCheckDialog.mode = 'upToDate'
+      updateCheckDialog.latestVersion = ''
+      updateCheckDialog.message = ''
+      updateCheckDialog.visible = true
       logEvent('info', 'No updates available')
       return
     }
 
-    showReleasePageButton.value = true
     releasePageUrl.value = String(result.releasePageUrl || DEFAULT_RELEASES_PAGE_URL).trim() || DEFAULT_RELEASES_PAGE_URL
-    configMessage.value = `New version ${result.latestVersion} available.`
+    updateCheckDialog.mode = 'updateAvailable'
+    updateCheckDialog.latestVersion = String(result.latestVersion || '').trim()
+    updateCheckDialog.message = ''
+    updateCheckDialog.visible = true
     logEvent('info', `Update found: ${result.latestVersion}`)
     if (result.releaseNotes) {
       logEvent('info', `Release notes: ${result.releaseNotes}`)
     }
   } catch (err) {
-    showReleasePageButton.value = false
     releasePageUrl.value = DEFAULT_RELEASES_PAGE_URL
     const message = errorMessage(err, 'Failed to check updates from GitHub Releases API.')
-    configMessage.value = message
+    updateCheckDialog.mode = 'error'
+    updateCheckDialog.latestVersion = ''
+    updateCheckDialog.message = message
+    updateCheckDialog.visible = true
     logEvent('error', message)
   } finally {
     isCheckingUpdates.value = false
@@ -531,11 +575,15 @@ function openReleasePage() {
   openExternalUrl(releasePageUrl.value || DEFAULT_RELEASES_PAGE_URL)
 }
 
+function closeUpdateCheckDialog() {
+  updateCheckDialog.visible = false
+}
+
 async function openProUpgrade() {
   await refreshLicenseStatus({ silent: true })
 
   if (proLicense.isPro) {
-    configMessage.value = `Pro is active (${proExpiryLabel.value}).`
+    configMessage.value = t('config.messages.proActive', { expiry: proExpiryLabel.value })
     logEvent('info', `Checked Pro expiry (${proExpiryLabel.value})`)
     return
   }
@@ -1098,14 +1146,12 @@ async function toggleTunnel(tunnel) {
     const runningCount = tunnels.value.filter((item) => item.status === 'running').length
     const pendingStartCount = pendingToggleTunnelIds.size
     if (runningCount + pendingStartCount >= FREE_PLAN_RUNNING_LIMIT) {
-      const message = locale.value === 'zh-CN'
-        ? `免费版最多同时运行 ${FREE_PLAN_RUNNING_LIMIT} 个 Tunnel，请先停止一个再启动。`
-        : `Free plan supports up to ${FREE_PLAN_RUNNING_LIMIT} running tunnels. Stop one before starting another.`
+      const message = t('config.messages.freePlanRunningLimit', { limit: FREE_PLAN_RUNNING_LIMIT })
       openActionDialog({
         mode: 'confirm',
         message,
         confirmButtonClass: 'btn-primary',
-        confirmLabel: 'Upgrade Now',
+        confirmLabel: t('app.sidebar.upgrade'),
         onConfirm: async () => {
           await openProUpgrade()
         }
@@ -1201,7 +1247,7 @@ function closeRedeemDialog(force = false) {
 async function submitRedeemDialog() {
   const code = String(redeemDialog.code || '').trim()
   if (!code) {
-    redeemDialog.error = locale.value === 'zh-CN' ? '请输入注册码。' : 'Please enter license code.'
+    redeemDialog.error = t('config.messages.enterLicenseCode')
     return
   }
 
@@ -1215,7 +1261,7 @@ async function submitRedeemDialog() {
       is_lifetime: redeemResult?.added_days >= LIFETIME_DURATION_DAYS,
       code: redeemResult?.code || code
     })
-    configMessage.value = `${redeemResult?.message || 'License redeemed.'} (${proExpiryLabel.value})`
+    configMessage.value = t('config.messages.licenseRedeemedWithExpiry', { expiry: proExpiryLabel.value })
     logEvent('info', `License redeemed successfully (${proExpiryLabel.value})`)
     closeRedeemDialog(true)
   } catch (err) {
@@ -1293,6 +1339,10 @@ onBeforeUnmount(() => {
   if (stateSyncTimer !== null) {
     window.clearInterval(stateSyncTimer)
     stateSyncTimer = null
+  }
+  if (configToastTimer !== null) {
+    window.clearTimeout(configToastTimer)
+    configToastTimer = null
   }
 })
 
@@ -1391,17 +1441,36 @@ watch(
           :pro-expiry-label="proExpiryLabel"
           :license-code="proLicense.code"
           :config-message="configMessage"
-          :show-release-page-button="showReleasePageButton"
           :is-checking-updates="isCheckingUpdates"
+          :is-refreshing-license-status="isRefreshingLicenseStatus"
+          :update-check-dialog="updateCheckDialog"
           @theme-change="setThemeBySwitch"
           @check-updates="checkForUpdates"
           @open-release-page="openReleasePage"
+          @close-update-check-dialog="closeUpdateCheckDialog"
+          @refresh-license-status="refreshLicenseStatusFromConfig"
           @upgrade="openProUpgrade"
           @set-config-message="setConfigMessage"
           @reload-state="loadStateFromBackend"
           @confirm-action="openActionDialog"
         />
       </main>
+
+      <div v-if="showConfigToast && configMessage" class="toast-container position-absolute bottom-0 start-50 translate-middle-x p-3 toast-config-container">
+        <div class="toast show align-items-center text-bg-dark border-0 toast-config-item" role="alert" aria-live="assertive" aria-atomic="true">
+          <div class="d-flex">
+            <div class="toast-body">
+              {{ configMessage }}
+            </div>
+            <button
+              type="button"
+              class="btn-close btn-close-white me-2 m-auto"
+              :aria-label="$t('app.common.close')"
+              @click="hideConfigToast"
+            />
+          </div>
+        </div>
+      </div>
     </section>
   </div>
 
@@ -1443,16 +1512,16 @@ watch(
   <div v-if="redeemDialog.visible" class="overlay">
     <div class="dialog-card compact-dialog redeem-dialog">
       <div class="dialog-head">
-        <h3 class="dialog-title">{{ locale === 'zh-CN' ? '输入邀请码' : 'Enter License Code' }}</h3>
+        <h3 class="dialog-title">{{ $t('config.redeemDialog.title') }}</h3>
       </div>
       <form class="dialog-body" @submit.prevent="submitRedeemDialog">
-        <label for="redeemCodeInput" class="form-label">{{ locale === 'zh-CN' ? '注册码' : 'License Code' }}</label>
+        <label for="redeemCodeInput" class="form-label">{{ $t('config.redeemDialog.codeLabel') }}</label>
         <input
           id="redeemCodeInput"
           v-model="redeemDialog.code"
           type="text"
           class="form-control"
-          :placeholder="locale === 'zh-CN' ? '例如：VIP-XXXX-XXXX-XXXX-XXXX' : 'Example: VIP-XXXX-XXXX-XXXX-XXXX'"
+          :placeholder="$t('config.redeemDialog.codePlaceholder')"
           :disabled="redeemDialog.submitting"
         />
         <p v-if="redeemDialog.error" class="form-error mb-0 mt-2">{{ redeemDialog.error }}</p>
@@ -1467,7 +1536,7 @@ watch(
               {{ $t('app.common.cancel') }}
             </button>
             <button type="submit" class="btn btn-primary" :disabled="redeemDialog.submitting">
-              {{ redeemDialog.submitting ? (locale === 'zh-CN' ? '提交中...' : 'Submitting...') : $t('app.sidebar.upgrade') }}
+              {{ redeemDialog.submitting ? $t('config.redeemDialog.submitting') : $t('app.sidebar.upgrade') }}
             </button>
           </div>
         </div>
