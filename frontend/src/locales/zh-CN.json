@@ -182,6 +182,27 @@
                 "errorMissingTarget": "SSH 命令缺少有效的 user{'@'}host，已阻止导入。",
                 "errorNoJumper": "没有可用跳板机。请在命令中带上 user{'@'}host，或先创建跳板机。"
             },
+            "importJumper": {
+                "title": "导入跳板机",
+                "source": "来源",
+                "loadResult": "加载结果",
+                "load": "加载",
+                "loading": "正在读取 SSH 配置...",
+                "emptyTitle": "没有找到可导入的主机",
+                "emptyDesc": "请先在 ~/.ssh/config 中添加显式 Host 别名，然后重新扫描。",
+                "jumperName": "跳板机名称",
+                "aliasLabel": "SSH 别名：{alias}",
+                "statusReady": "可导入",
+                "statusError": "已阻止",
+                "detailLabel": "导入详情",
+                "importBtn": "导入（{count}）",
+                "warningAgentFallback": "未发现 IdentityFile，将默认使用 SSH Agent。",
+                "errorMissingUser": "SSH 配置缺少 User，请补充后再导入。",
+                "errorMissingHost": "SSH 配置缺少 HostName 或目标主机。",
+                "errorProxyJump": "该别名配置了 ProxyJump（{proxyJump}），当前请手动创建跳板链路。",
+                "errorDuplicateExisting": "已存在相同 user/host/port 的跳板机。",
+                "errorDuplicateBatch": "当前导入结果中存在重复主机。"
+            },
             "tunnel": {
                 "newTitle": "新建隧道",
                 "editTitle": "编辑隧道",

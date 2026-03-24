@@ -182,6 +182,27 @@
                 "errorMissingTarget": "В команде SSH нет корректного user{'@'}host; импорт заблокирован.",
                 "errorNoJumper": "Нет доступного прыжкового сервера. Укажите user{'@'}host в команде или создайте сервер."
             },
+            "importJumper": {
+                "title": "Импорт jump host",
+                "source": "Источник",
+                "loadResult": "Результат загрузки",
+                "load": "Загрузить",
+                "loading": "Читаем SSH config...",
+                "emptyTitle": "Подходящие хосты не найдены",
+                "emptyDesc": "Добавьте явные алиасы Host в ~/.ssh/config и повторите загрузку.",
+                "jumperName": "Имя jump host",
+                "aliasLabel": "SSH alias: {alias}",
+                "statusReady": "Готово",
+                "statusError": "Блок",
+                "detailLabel": "Детали импорта",
+                "importBtn": "Импорт ({count})",
+                "warningAgentFallback": "IdentityFile не найден. По умолчанию будет использован SSH Agent.",
+                "errorMissingUser": "В SSH config отсутствует User. Добавьте его перед импортом.",
+                "errorMissingHost": "В SSH config отсутствует HostName или целевой хост.",
+                "errorProxyJump": "Для алиаса настроен ProxyJump ({proxyJump}). Пока создайте цепочку jump host вручную.",
+                "errorDuplicateExisting": "Jump host с тем же user/host/port уже существует.",
+                "errorDuplicateBatch": "Этот хост дублируется в текущем результате импорта."
+            },
             "tunnel": {
                 "newTitle": "Новый туннель",
                 "editTitle": "Изменить туннель",

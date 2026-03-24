@@ -182,6 +182,27 @@
                 "errorMissingTarget": "SSH 指令缺少有效的 user{'@'}host，已阻止匯入。",
                 "errorNoJumper": "沒有可用跳板機。請在指令中帶上 user{'@'}host，或先建立跳板機。"
             },
+            "importJumper": {
+                "title": "匯入跳板機",
+                "source": "來源",
+                "loadResult": "載入結果",
+                "load": "載入",
+                "loading": "正在讀取 SSH 設定...",
+                "emptyTitle": "找不到可匯入的主機",
+                "emptyDesc": "請先在 ~/.ssh/config 中加入明確的 Host 別名，再重新掃描。",
+                "jumperName": "跳板機名稱",
+                "aliasLabel": "SSH 別名：{alias}",
+                "statusReady": "可匯入",
+                "statusError": "已阻擋",
+                "detailLabel": "匯入詳情",
+                "importBtn": "匯入（{count}）",
+                "warningAgentFallback": "未找到 IdentityFile，將預設使用 SSH Agent。",
+                "errorMissingUser": "SSH 設定缺少 User，請補上後再匯入。",
+                "errorMissingHost": "SSH 設定缺少 HostName 或目標主機。",
+                "errorProxyJump": "此別名設定了 ProxyJump（{proxyJump}），目前請手動建立跳板鏈。",
+                "errorDuplicateExisting": "已存在相同 user/host/port 的跳板機。",
+                "errorDuplicateBatch": "目前匯入結果中有重複主機。"
+            },
             "tunnel": {
                 "newTitle": "新建隧道",
                 "editTitle": "編輯隧道",

@@ -10,7 +10,7 @@ defineProps({
   }
 })
 
-defineEmits(['new-jumper', 'new-tunnel', 'import-tunnel'])
+defineEmits(['new-jumper', 'new-tunnel', 'import-tunnel', 'import-jumper'])
 </script>
 
 <template>
@@ -20,6 +20,10 @@ defineEmits(['new-jumper', 'new-tunnel', 'import-tunnel'])
       <p class="page-subtitle">{{ currentPage?.subtitle }}</p>
     </div>
     <div class="d-flex align-items-center gap-2">
+      <button v-if="activePage === 'jumpers'" type="button" class="btn btn-outline-primary" @click="$emit('import-jumper')">
+        <i class="bi bi-file-earmark-plus me-1"></i>
+        {{ $t('app.header.importTunnel') }}
+      </button>
       <button v-if="activePage === 'jumpers'" type="button" class="btn btn-primary" @click="$emit('new-jumper')">
         {{ $t('app.header.newJumper') }}
       </button>

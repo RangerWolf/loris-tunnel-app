@@ -93,7 +93,7 @@
   box-shadow: 0 0 0 0.16rem rgba(var(--bs-primary-rgb), 0.22) !important;
 }
 
-.btn-group .btn-outline-secondary.active,
+/* .btn-group .btn-outline-secondary.active,
 .btn-group .btn-outline-secondary:active,
 .btn-group .btn-check:checked+.btn-outline-secondary {
   color: var(--lt-accent-ink) !important;
@@ -106,7 +106,7 @@
 .btn-group .btn-outline-secondary:focus-visible {
   outline: none !important;
   box-shadow: 0 0 0 0.16rem rgba(var(--bs-primary-rgb), 0.22) !important;
-}
+} */
 
 .sidebar-footer {
   display: flex;

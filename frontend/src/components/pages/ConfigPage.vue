@@ -205,10 +205,10 @@ watch(locale, (newLocale) => {
               <div class="config-name">{{ t('config.manageConfig') }}</div>
               <div class="config-desc">{{ t('config.manageConfigDesc') }}</div>
             </div>
-            <div class="btn-group">
+            <div class="btn-group" role="group" :aria-label="t('config.manageConfig')">
               <button
                 type="button"
-                class="btn btn-sm btn-outline-dark"
+                class="btn btn-sm btn-secondary"
                 :disabled="configBusy !== ''"
                 @click="onImportConfig"
               >
@@ -216,7 +216,7 @@ watch(locale, (newLocale) => {
               </button>
               <button
                 type="button"
-                class="btn btn-sm btn-outline-dark"
+                class="btn btn-sm btn-secondary"
                 :disabled="configBusy !== ''"
                 @click="onExportConfig"
               >
@@ -224,7 +224,7 @@ watch(locale, (newLocale) => {
               </button>
               <button
                 type="button"
-                class="btn btn-sm btn-outline-dark"
+                class="btn btn-sm btn-secondary"
                 @click="onOpenConfigDir"
               >
                 {{ t('config.openConfigDirBtn') }}
@@ -247,7 +247,7 @@ watch(locale, (newLocale) => {
             </div>
             <button
               type="button"
-              class="btn btn-sm btn-outline-dark position-relative check-updates-btn"
+              class="btn btn-sm btn-secondary position-relative check-updates-btn"
               :disabled="isCheckingUpdates"
               @click="$emit('check-updates')"
             >
@@ -266,11 +266,11 @@ watch(locale, (newLocale) => {
                 <span v-else class="text-muted">{{ t('config.freeVersion') }}</span>
               </div>
             </div>
-            <div class="btn-group">
+            <div class="btn-group" role="group" :aria-label="t('config.licenseStatus')">
               <button
                 v-if="!isPro"
                 type="button"
-                class="btn btn-sm btn-outline-dark"
+                class="btn btn-sm btn-secondary"
                 @click="$emit('upgrade')"
               >
                 {{ t('config.upgradePro') }}

@@ -18,6 +18,7 @@ import (
 	"loris-tunnel/internal/device"
 	"loris-tunnel/internal/license"
 	"loris-tunnel/internal/model"
+	"loris-tunnel/internal/sshconfig"
 	"loris-tunnel/internal/updater"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -166,6 +167,20 @@ func (a *App) ListJumpers() ([]model.Jumper, error) {
 		return nil, err
 	}
 	return a.jumper.List()
+}
+
+func (a *App) GetSSHConfigImportSources() ([]model.SSHConfigImportSource, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return sshconfig.GetImportSources()
+}
+
+func (a *App) LoadSSHConfigJumpersByPath(configPath string) (model.SSHConfigImportResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.SSHConfigImportResult{}, err
+	}
+	return sshconfig.LoadImportCandidates(configPath)
 }
 
 func (a *App) CreateJumper(payload model.JumperPayload) (model.Jumper, error) {

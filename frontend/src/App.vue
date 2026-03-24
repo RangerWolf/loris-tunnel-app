@@ -9,8 +9,10 @@ import {
   DeleteTunnel,
   GetAutoRunEnabled,
   GetLicenseStatus as GetLicenseStatusAPI,
+  GetSSHConfigImportSources,
   GetStoredLicenseCode,
   GetState,
+  LoadSSHConfigJumpersByPath,
   RedeemLicenseCode as RedeemLicenseCodeAPI,
   SetAutoRunEnabled,
   TestJumperConnection as TestJumperConnectionAPI,
@@ -28,6 +30,7 @@ import TunnelsPage from './components/pages/TunnelsPage.vue'
 import LogsPage from './components/pages/LogsPage.vue'
 import ConfigPage from './components/pages/ConfigPage.vue'
 import JumperModal from './components/modals/JumperModal.vue'
+import ImportJumperModal from './components/modals/ImportJumperModal.vue'
 import TunnelModal from './components/modals/TunnelModal.vue'
 import ImportTunnelModal from './components/modals/ImportTunnelModal.vue'
 import './styles/app-shell.css'
@@ -76,7 +79,7 @@ const CONFIG_TOAST_DURATION_MS = 3800
 let configToastTimer = null
 
 const appMeta = reactive({
-  version: '0.20.1-alpha'
+  version: '0.21.1-alpha'
 })
 const proLicense = reactive({
   isPro: false,
@@ -129,8 +132,15 @@ const logs = ref([
 
 const showJumperModal = ref(false)
 const showTunnelModal = ref(false)
+const showImportJumperModal = ref(false)
 const showImportTunnelModal = ref(false)
+const importJumperLoading = ref(false)
+const importJumperError = ref('')
 const importTunnelError = ref('')
+const importJumperHasLoaded = ref(false)
+const sshConfigSources = ref([])
+const selectedImportJumperSourcePath = ref('')
+const sshConfigCandidates = ref([])
 const editingJumperId = ref(null)
 const editingTunnelId = ref(null)
 const showJumperBasic = ref(true)
@@ -687,6 +697,57 @@ function openNewJumper() {
   showJumperModal.value = true
 }
 
+async function loadImportJumperSources() {
+  importJumperError.value = ''
+  try {
+    const sources = await GetSSHConfigImportSources()
+    sshConfigSources.value = Array.isArray(sources) ? sources : []
+    selectedImportJumperSourcePath.value = sshConfigSources.value[0]?.path || ''
+  } catch (err) {
+    sshConfigSources.value = []
+    selectedImportJumperSourcePath.value = ''
+    importJumperError.value = errorMessage(err, 'Failed to load SSH config sources')
+  }
+}
+
+async function loadImportJumpers() {
+  const targetPath = String(selectedImportJumperSourcePath.value || '').trim()
+  if (!targetPath) return
+
+  importJumperLoading.value = true
+  importJumperError.value = ''
+  importJumperHasLoaded.value = false
+  try {
+    const result = await LoadSSHConfigJumpersByPath(targetPath)
+    sshConfigCandidates.value = Array.isArray(result?.candidates) ? result.candidates : []
+    importJumperHasLoaded.value = true
+  } catch (err) {
+    sshConfigCandidates.value = []
+    importJumperError.value = errorMessage(err, 'Failed to load SSH config jumpers')
+  } finally {
+    importJumperLoading.value = false
+  }
+}
+
+function openImportJumper() {
+  showImportJumperModal.value = true
+  importJumperLoading.value = false
+  importJumperError.value = ''
+  importJumperHasLoaded.value = false
+  sshConfigCandidates.value = []
+  void loadImportJumperSources()
+}
+
+function closeImportJumper() {
+  showImportJumperModal.value = false
+  importJumperLoading.value = false
+  importJumperError.value = ''
+  importJumperHasLoaded.value = false
+  sshConfigSources.value = []
+  selectedImportJumperSourcePath.value = ''
+  sshConfigCandidates.value = []
+}
+
 function editJumper(jumper) {
   editingJumperId.value = jumper.id
   Object.assign(jumperForm, defaultJumperForm(), jumper)
@@ -746,6 +807,60 @@ async function saveJumper() {
     showJumperModal.value = false
   } catch (err) {
     jumperValidationError.value = errorMessage(err)
+  }
+}
+
+async function importJumpers(jumpersToImport) {
+  try {
+    importJumperError.value = ''
+    let importedCount = 0
+    let skippedCount = 0
+
+    const existingSignatures = new Set(
+      jumpers.value.map((item) => `${String(item.host || '').trim().toLowerCase()}|${String(item.user || '').trim()}|${Number(item.port) || 22}`)
+    )
+
+    for (const item of jumpersToImport) {
+      const payload = {
+        name: String(item.name || '').trim(),
+        host: String(item.host || '').trim(),
+        port: Number(item.port) || 22,
+        user: String(item.user || '').trim(),
+        authType: item.authType || 'ssh_agent',
+        keyPath: String(item.keyPath || '').trim(),
+        agentSocketPath: String(item.agentSocketPath || '').trim(),
+        password: '',
+        bypassHostVerification: !!item.bypassHostVerification,
+        keepAliveIntervalMs: Number(item.keepAliveIntervalMs) || 5000,
+        timeoutMs: Number(item.timeoutMs) || 5000,
+        hostKeyAlgorithms: String(item.hostKeyAlgorithms || '').trim(),
+        notes: `Imported from SSH config alias "${item.alias}" on ${new Date().toLocaleDateString()}`
+      }
+
+      const signature = `${payload.host.toLowerCase()}|${payload.user}|${payload.port}`
+      if (existingSignatures.has(signature)) {
+        skippedCount++
+        continue
+      }
+
+      await CreateJumper(payload)
+      existingSignatures.add(signature)
+      importedCount++
+      logEvent('info', `Jumper ${payload.name} imported from SSH config`)
+    }
+
+    await loadStateFromBackend()
+    closeImportJumper()
+
+    let message = `Successfully imported ${importedCount} jumper(s)`
+    if (skippedCount > 0) {
+      message = `${message}; skipped ${skippedCount} duplicate jumper(s)`
+    }
+    logEvent('info', message)
+  } catch (err) {
+    const message = errorMessage(err, 'Failed to import jumpers')
+    importJumperError.value = message
+    logEvent('error', message)
   }
 }
 
@@ -1381,6 +1496,7 @@ watch(
       <AppTopHeader
         :current-page="currentPage"
         :active-page="activePage"
+        @import-jumper="openImportJumper"
         @new-jumper="openNewJumper"
         @new-tunnel="openNewTunnel"
         @import-tunnel="openImportTunnel"
@@ -1563,6 +1679,24 @@ watch(
     @toggle-advanced="showJumperAdvanced = !showJumperAdvanced"
     @key-file-change="onJumperKeyFileChange"
     @test-connection="testJumperConnection"
+  />
+
+  <ImportJumperModal
+    :show="showImportJumperModal"
+    :candidates="sshConfigCandidates"
+    :existing-jumpers="jumpers"
+    :auth-options="authOptions"
+    :jumper-limits="JUMPER_LIMITS"
+    :sources="sshConfigSources"
+    :selected-source-path="selectedImportJumperSourcePath"
+    :loading="importJumperLoading"
+    :load-error="importJumperError"
+    :import-error="importJumperError"
+    :has-loaded="importJumperHasLoaded"
+    @close="closeImportJumper"
+    @update:selected-source-path="selectedImportJumperSourcePath = $event"
+    @load="loadImportJumpers"
+    @import="importJumpers"
   />
 
   <TunnelModal

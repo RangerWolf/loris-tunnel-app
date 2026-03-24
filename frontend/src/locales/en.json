@@ -182,6 +182,27 @@
                 "errorMissingTarget": "SSH command is missing a valid user{'@'}host target; import was blocked.",
                 "errorNoJumper": "No jumper available. Parse with user{'@'}host, or create a jumper first."
             },
+            "importJumper": {
+                "title": "Import Jumpers",
+                "source": "Source",
+                "loadResult": "Load Result",
+                "load": "Load",
+                "loading": "Reading SSH config...",
+                "emptyTitle": "No importable hosts found",
+                "emptyDesc": "Add explicit Host aliases in ~/.ssh/config, then reload this list.",
+                "jumperName": "Jumper Name",
+                "aliasLabel": "SSH alias: {alias}",
+                "statusReady": "Ready",
+                "statusError": "Blocked",
+                "detailLabel": "Import details",
+                "importBtn": "Import ({count})",
+                "warningAgentFallback": "No IdentityFile found. This entry will default to SSH Agent.",
+                "errorMissingUser": "Missing User in SSH config. Add User for this alias before importing.",
+                "errorMissingHost": "Missing HostName or target host in SSH config.",
+                "errorProxyJump": "ProxyJump is configured ({proxyJump}). Create the jumper chain manually for now.",
+                "errorDuplicateExisting": "A jumper with the same user/host/port already exists.",
+                "errorDuplicateBatch": "This host is duplicated in the current import result."
+            },
             "tunnel": {
                 "newTitle": "New Tunnel",
                 "editTitle": "Edit Tunnel",
