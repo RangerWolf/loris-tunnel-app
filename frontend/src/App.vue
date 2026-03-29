@@ -14,6 +14,7 @@ import {
   GetState,
   LoadSSHConfigJumpersByPath,
   RedeemLicenseCode as RedeemLicenseCodeAPI,
+  SaveUILocale,
   SetAutoRunEnabled,
   TestJumperConnection as TestJumperConnectionAPI,
   TestTunnelConnection as TestTunnelConnectionAPI,
@@ -79,7 +80,7 @@ const CONFIG_TOAST_DURATION_MS = 3800
 let configToastTimer = null
 
 const appMeta = reactive({
-  version: '0.21.1-alpha'
+  version: '0.22.1-alpha'
 })
 const proLicense = reactive({
   isPro: false,
@@ -1435,6 +1436,11 @@ function deleteJumper(jumper) {
 
 onMounted(async () => {
   await loadStateFromBackend()
+  try {
+    await SaveUILocale(locale.value)
+  } catch (_) {
+    /* tray locale sync is best-effort */
+  }
   await loadStoredLicenseCode()
   const licenseStatusReady = await refreshLicenseStatus({ silent: true })
   // If launch at login is on but user is not Pro or expired, disable it and show upgrade prompt

@@ -7,7 +7,8 @@ import {
   ExportConfigWithDialog,
   SelectImportFile,
   ImportConfig,
-  OpenConfigDir
+  OpenConfigDir,
+  SaveUILocale
 } from '../../../wailsjs/go/main/App'
 
 const props = defineProps({
@@ -138,8 +139,13 @@ async function onOpenConfigDir() {
   }
 }
 
-watch(locale, (newLocale) => {
+watch(locale, async (newLocale) => {
   localStorage.setItem('loris-tunnel.locale', newLocale)
+  try {
+    await SaveUILocale(newLocale)
+  } catch (_) {
+    /* backend may be unavailable in browser-only dev */
+  }
 })
 </script>
 
@@ -212,7 +218,7 @@ watch(locale, (newLocale) => {
                 :disabled="configBusy !== ''"
                 @click="onImportConfig"
               >
-                {{ configBusy === 'import' ? '...' : t('config.importConfigBtn') }}
+                {{ t('config.importConfigBtn') }}
               </button>
               <button
                 type="button"
@@ -220,7 +226,7 @@ watch(locale, (newLocale) => {
                 :disabled="configBusy !== ''"
                 @click="onExportConfig"
               >
-                {{ configBusy === 'export' ? '...' : t('config.exportConfigBtn') }}
+                {{ t('config.exportConfigBtn') }}
               </button>
               <button
                 type="button"

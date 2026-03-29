@@ -1,0 +1,42 @@
+{
+  "en": {
+    "showMainTitle": "Show main window",
+    "showMainTooltip": "Bring the application window to the front",
+    "quitTitle": "Quit",
+    "quitTooltip": "Quit the application",
+    "iconTooltip": "Loris Tunnel",
+    "appTitle": "Loris Tunnel"
+  },
+  "zh-CN": {
+    "showMainTitle": "显示主窗口",
+    "showMainTooltip": "将应用窗口置于前台",
+    "quitTitle": "退出",
+    "quitTooltip": "退出应用",
+    "iconTooltip": "Loris Tunnel",
+    "appTitle": "Loris Tunnel"
+  },
+  "zh-TW": {
+    "showMainTitle": "顯示主視窗",
+    "showMainTooltip": "將應用程式視窗帶到前景",
+    "quitTitle": "結束",
+    "quitTooltip": "結束應用程式",
+    "iconTooltip": "Loris Tunnel",
+    "appTitle": "Loris Tunnel"
+  },
+  "zh-HK": {
+    "showMainTitle": "顯示主視窗",
+    "showMainTooltip": "將應用程式視窗帶到前景",
+    "quitTitle": "結束",
+    "quitTooltip": "結束應用程式",
+    "iconTooltip": "Loris Tunnel",
+    "appTitle": "Loris Tunnel"
+  },
+  "ru": {
+    "showMainTitle": "Показать окно",
+    "showMainTooltip": "Вывести окно приложения на передний план",
+    "quitTitle": "Выход",
+    "quitTooltip": "Закрыть приложение",
+    "iconTooltip": "Loris Tunnel",
+    "appTitle": "Loris Tunnel"
+  }
+}

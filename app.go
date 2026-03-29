@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/energye/systray"
 	"loris-tunnel/internal/autostart"
 	"loris-tunnel/internal/biz"
 	"loris-tunnel/internal/conf"
@@ -19,6 +21,8 @@ import (
 	"loris-tunnel/internal/license"
 	"loris-tunnel/internal/model"
 	"loris-tunnel/internal/sshconfig"
+	"loris-tunnel/internal/traytext"
+	"loris-tunnel/internal/uilocale"
 	"loris-tunnel/internal/updater"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -34,6 +38,10 @@ type App struct {
 	license   *license.Client
 	machineID string
 	initErr   error
+
+	trayMu   sync.Mutex
+	trayShow *systray.MenuItem
+	trayQuit *systray.MenuItem
 }
 
 // NewApp creates a new App application struct
@@ -109,6 +117,60 @@ func configureLogger(configPath string, level slog.Level) error {
 
 // startup is called when the app starts. The context is saved
 // so we can call the runtime methods
+// SetTrayMenuItems wires systray menu entries created in main so locale changes can relabel them.
+func (a *App) SetTrayMenuItems(show, quit *systray.MenuItem) {
+	a.trayMu.Lock()
+	defer a.trayMu.Unlock()
+	a.trayShow = show
+	a.trayQuit = quit
+}
+
+func (a *App) applyTrayLocaleUnlocked(tag string) {
+	s := traytext.ForLocale(tag)
+	if a.trayShow != nil {
+		a.trayShow.SetTitle(s.ShowMainTitle)
+		a.trayShow.SetTooltip(s.ShowMainTooltip)
+	}
+	if a.trayQuit != nil {
+		a.trayQuit.SetTitle(s.QuitTitle)
+		a.trayQuit.SetTooltip(s.QuitTooltip)
+	}
+	if runtime.GOOS != "darwin" {
+		systray.SetTitle(s.AppTitle)
+	}
+	systray.SetTooltip(s.IconTooltip)
+}
+
+// ApplyTrayLocale updates tray icon tooltip and menu item titles to match a vue-i18n locale tag.
+func (a *App) ApplyTrayLocale(locale string) {
+	a.trayMu.Lock()
+	defer a.trayMu.Unlock()
+	tag := uilocale.Normalize(locale)
+	if tag == "" {
+		tag = "en"
+	}
+	a.applyTrayLocaleUnlocked(tag)
+}
+
+// SaveUILocale persists ui.locale beside config.toml and refreshes the tray (call when the UI language changes).
+func (a *App) SaveUILocale(locale string) error {
+	if a.storage == nil {
+		return fmt.Errorf("storage unavailable")
+	}
+	dir := filepath.Dir(a.storage.Path())
+	if err := uilocale.WriteFile(dir, locale); err != nil {
+		return err
+	}
+	a.trayMu.Lock()
+	defer a.trayMu.Unlock()
+	tag := uilocale.Normalize(locale)
+	if tag == "" {
+		tag = "en"
+	}
+	a.applyTrayLocaleUnlocked(tag)
+	return nil
+}
+
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	buildType := wailsruntime.Environment(ctx).BuildType

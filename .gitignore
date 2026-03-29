@@ -19,6 +19,7 @@ frontend/package.json.md5
 
 # Local machine / runtime config
 config.toml
+ui.locale
 .DS_Store
 
 # .log
