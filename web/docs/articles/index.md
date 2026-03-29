@@ -7,11 +7,12 @@ Explore in-depth articles, tutorials, and best practices for managing SSH tunnel
 ### [Introduction to Loris Tunnel](./introduction)
 A comprehensive guide to getting started with Loris Tunnel, covering its core features and benefits.
 
+### [OpenClaw Remote Gateway + SSH Tunnels](./openclaw-remote-gateway-ssh-tunnel)
+How to pair OpenClaw’s remote gateway with Loris Tunnel for stable local port forwarding, auto-reconnect, and a desktop-first workflow.
+
 ## Upcoming Topics
 
 We are working on more content to help you get the most out of your SSH workflows:
-
-- **SSH Tunnel + OpenClaw**: How to combine these tools for ultimate network flexibility.
 - **Advanced Multi-hop Configurations**: Nested jumper servers for complex internal networks.
 - **Database Proxying**: Securely accessing remote databases via SSH port forwarding.
 
