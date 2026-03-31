@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/energye/systray"
@@ -42,6 +43,8 @@ type App struct {
 	trayMu   sync.Mutex
 	trayShow *systray.MenuItem
 	trayQuit *systray.MenuItem
+
+	allowClose atomic.Bool
 }
 
 // NewApp creates a new App application struct
@@ -179,8 +182,29 @@ func (a *App) startup(ctx context.Context) {
 	slog.Info("app startup")
 	if err := a.ensureReady(); err == nil {
 		a.syncAutoRunWithConfig()
-		_ = a.tunnel.StartAutoStart()
+		go func() {
+			if err := a.tunnel.StartAutoStart(); err != nil {
+				slog.Error("auto start tunnel failed", "err", err)
+			}
+		}()
 	}
+}
+
+func (a *App) PrepareForQuit() {
+	a.allowClose.Store(true)
+}
+
+func (a *App) beforeClose(ctx context.Context) (prevent bool) {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	if a.allowClose.Load() {
+		return false
+	}
+	slog.Info("window close intercepted; hiding to tray")
+	wailsruntime.Hide(ctx)
+	wailsruntime.WindowHide(ctx)
+	return true
 }
 
 func (a *App) shutdown(ctx context.Context) {

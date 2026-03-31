@@ -80,7 +80,7 @@ const CONFIG_TOAST_DURATION_MS = 3800
 let configToastTimer = null
 
 const appMeta = reactive({
-  version: '0.22.1-alpha'
+  version: '0.22.3-alpha'
 })
 const proLicense = reactive({
   isPro: false,

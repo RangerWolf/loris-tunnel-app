@@ -79,6 +79,7 @@ func main() {
 		quitMenu := systray.AddMenuItem(trayLabels.QuitTitle, trayLabels.QuitTooltip)
 		quitMenu.Click(func() {
 			if app != nil && app.ctx != nil {
+				app.PrepareForQuit()
 				wailsruntime.Quit(app.ctx)
 				return
 			}
@@ -118,6 +119,7 @@ func main() {
 		},
 		BackgroundColour:  &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup:         app.startup,
+		OnBeforeClose:     app.beforeClose,
 		OnShutdown:        app.shutdown,
 		HideWindowOnClose: runtime.GOOS == "darwin",
 		Bind: []interface{}{

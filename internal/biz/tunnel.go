@@ -310,26 +310,39 @@ func (b *TunnelBiz) StartAutoStart() error {
 		return err
 	}
 
+	autoStartTunnels := make([]model.Tunnel, 0, len(cfg.Tunnels))
 	for _, t := range cfg.Tunnels {
 		if !t.AutoStart {
 			continue
 		}
-		if t.Mode != "local" && t.Mode != "remote" && t.Mode != "dynamic" {
-			_, _ = b.updateStatus(t.ID, "error", fmt.Sprintf("mode %s is not supported yet, only local, remote and dynamic forward are implemented", t.Mode))
-			continue
-		}
-
-		jumpers, err := collectJumpers(cfg.Jumpers, t.JumperIDs)
-		if err != nil {
-			_, _ = b.updateStatus(t.ID, "error", "jumper not found")
-			continue
-		}
-		if err := b.startRuntime(t, jumpers); err != nil {
-			_, _ = b.updateStatus(t.ID, "error", errReason(err))
-			continue
-		}
-		_, _ = b.updateStatus(t.ID, "running", "")
+		_, _ = b.updateStatus(t.ID, "busy", "")
+		autoStartTunnels = append(autoStartTunnels, t)
 	}
+
+	var wg sync.WaitGroup
+	for _, tunnel := range autoStartTunnels {
+		t := tunnel
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if t.Mode != "local" && t.Mode != "remote" && t.Mode != "dynamic" {
+				_, _ = b.updateStatus(t.ID, "error", fmt.Sprintf("mode %s is not supported yet, only local, remote and dynamic forward are implemented", t.Mode))
+				return
+			}
+
+			jumpers, err := collectJumpers(cfg.Jumpers, t.JumperIDs)
+			if err != nil {
+				_, _ = b.updateStatus(t.ID, "error", "jumper not found")
+				return
+			}
+			if err := b.startRuntime(t, jumpers); err != nil {
+				_, _ = b.updateStatus(t.ID, "error", errReason(err))
+				return
+			}
+			_, _ = b.updateStatus(t.ID, "running", "")
+		}()
+	}
+	wg.Wait()
 	return nil
 }
 
