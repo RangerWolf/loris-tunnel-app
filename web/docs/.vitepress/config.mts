@@ -10,6 +10,7 @@ export default defineConfig({
         nav: [
             { text: 'Home', link: '/' },
             { text: 'Learn More', link: '/articles/introduction' },
+            { text: 'Codex SSH Guide', link: '/articles/codex-ssh-login-with-loris-tunnel' },
             { text: 'OpenClaw + Tunnels', link: '/articles/openclaw-remote-gateway-ssh-tunnel' },
             { text: 'Articles', link: '/articles/' }
         ],
@@ -25,6 +26,7 @@ export default defineConfig({
                 text: 'Articles',
                 items: [
                     { text: 'All Articles', link: '/articles/' },
+                    { text: 'Codex SSH Login on Remote Servers', link: '/articles/codex-ssh-login-with-loris-tunnel' },
                     { text: 'OpenClaw + SSH Tunnels', link: '/articles/openclaw-remote-gateway-ssh-tunnel' },
                     { text: 'Sample Template', link: '/articles/sample' },
                 ]

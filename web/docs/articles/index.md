@@ -10,6 +10,9 @@ A comprehensive guide to getting started with Loris Tunnel, covering its core fe
 ### [OpenClaw Remote Gateway + SSH Tunnels](./openclaw-remote-gateway-ssh-tunnel)
 How to pair OpenClaw’s remote gateway with Loris Tunnel for stable local port forwarding, auto-reconnect, and a desktop-first workflow.
 
+### [Codex SSH Login on Remote Servers](./codex-ssh-login-with-loris-tunnel)
+A practical guide for the `codex ssh` login callback issue on remote servers, based on issue #2668 and improved with Loris Tunnel tunnel management.
+
 ## Upcoming Topics
 
 We are working on more content to help you get the most out of your SSH workflows:
