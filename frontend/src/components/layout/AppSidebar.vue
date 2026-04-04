@@ -45,7 +45,10 @@ defineEmits(['switch-page', 'upgrade'])
           :class="{ active: activePage === page.key }"
           @click="$emit('switch-page', page.key)"
         >
-          {{ page.title }}
+          <span class="nav-item-label">
+            <span>{{ page.title }}</span>
+            <span v-if="page.beta" class="nav-beta-tag">Beta</span>
+          </span>
         </button>
       </div>
     </div>

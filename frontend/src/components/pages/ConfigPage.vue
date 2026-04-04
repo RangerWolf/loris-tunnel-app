@@ -139,6 +139,7 @@ async function onOpenConfigDir() {
   }
 }
 
+
 watch(locale, async (newLocale) => {
   localStorage.setItem('loris-tunnel.locale', newLocale)
   try {
@@ -237,6 +238,7 @@ watch(locale, async (newLocale) => {
               </button>
             </div>
           </div>
+
         </div>
       </div>
 
@@ -350,4 +352,5 @@ watch(locale, async (newLocale) => {
     </div>
   </div>
   <div v-if="updateCheckDialog.visible" class="modal-backdrop fade show" />
+
 </template>

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,6 +22,8 @@ import (
 	"loris-tunnel/internal/conf"
 	"loris-tunnel/internal/device"
 	"loris-tunnel/internal/license"
+	"loris-tunnel/internal/mcphttp"
+	"loris-tunnel/internal/mcpinstall"
 	"loris-tunnel/internal/model"
 	"loris-tunnel/internal/sshconfig"
 	"loris-tunnel/internal/traytext"
@@ -35,10 +39,12 @@ type App struct {
 	storage   *conf.Storage
 	jumper    *biz.JumperBiz
 	tunnel    *biz.TunnelBiz
+	sshPilot  *biz.SSHPilotBiz
 	updater   *updater.Service
 	license   *license.Client
 	machineID string
 	initErr   error
+	mcpServer *mcphttp.Server
 
 	trayMu   sync.Mutex
 	trayShow *systray.MenuItem
@@ -63,6 +69,7 @@ func NewApp() *App {
 		storage:   storage,
 		jumper:    biz.NewJumperBiz(storage),
 		tunnel:    biz.NewTunnelBiz(storage),
+		sshPilot:  biz.NewSSHPilotBiz(storage),
 		updater:   updater.NewDefaultService(),
 		license:   license.NewDefaultClient(),
 		machineID: device.MachineID(),
@@ -181,6 +188,9 @@ func (a *App) startup(ctx context.Context) {
 	slog.Info("license client initialized", "build_type", buildType, "api_base_url", a.license.BaseURL())
 	slog.Info("app startup")
 	if err := a.ensureReady(); err == nil {
+		if err := a.startMCPHTTPServer(); err != nil {
+			slog.Error("start mcp http server failed", "err", err)
+		}
 		a.syncAutoRunWithConfig()
 		go func() {
 			if err := a.tunnel.StartAutoStart(); err != nil {
@@ -210,6 +220,11 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 func (a *App) shutdown(ctx context.Context) {
 	_ = ctx
 	slog.Info("app shutdown")
+	if a.mcpServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = a.mcpServer.Shutdown(shutdownCtx)
+		cancel()
+	}
 	if a.tunnel != nil {
 		a.tunnel.Shutdown()
 	}
@@ -343,6 +358,128 @@ func (a *App) ToggleTunnel(id int) (model.Tunnel, error) {
 		return model.Tunnel{}, err
 	}
 	return a.tunnel.Toggle(id)
+}
+
+func (a *App) GetSSHPilotState() (model.SSHPilotState, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.SSHPilotState{}, err
+	}
+	if a.sshPilot == nil {
+		return model.SSHPilotState{}, fmt.Errorf("ssh pilot service is not initialized")
+	}
+	return a.sshPilot.GetState()
+}
+
+func (a *App) UpdateSSHPilotSettings(payload model.SSHPilotUpdatePayload) (model.SSHPilotState, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.SSHPilotState{}, err
+	}
+	if a.sshPilot == nil {
+		return model.SSHPilotState{}, fmt.Errorf("ssh pilot service is not initialized")
+	}
+	return a.sshPilot.UpdateSettings(payload)
+}
+
+func (a *App) ExecuteSSHPilotScript(scriptID string) (model.SSHPilotExecResult, error) {
+	return a.ExecuteSSHPilotCommand(scriptID)
+}
+
+func (a *App) ExecuteSSHPilotCommand(command string) (model.SSHPilotExecResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.SSHPilotExecResult{}, err
+	}
+	if a.sshPilot == nil {
+		return model.SSHPilotExecResult{}, fmt.Errorf("ssh pilot service is not initialized")
+	}
+	return a.sshPilot.ExecuteCommand(command)
+}
+
+func (a *App) ListMCPInstallTargets() ([]model.MCPInstallTarget, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return mcpinstall.ListTargets()
+}
+
+func (a *App) InstallMCPToApps(payload model.MCPInstallRequest) (model.MCPInstallResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.MCPInstallResult{}, err
+	}
+	if a.mcpServer == nil {
+		return model.MCPInstallResult{}, fmt.Errorf("mcp http server is not ready")
+	}
+	return mcpinstall.Install(payload.TargetIDs, a.mcpServer.BaseURL())
+}
+
+// Backward compatibility wrappers for older frontend bindings.
+func (a *App) ListSkillInstallTargets() ([]model.MCPInstallTarget, error) {
+	return a.ListMCPInstallTargets()
+}
+
+func (a *App) InstallSkillsToApps(payload model.MCPInstallRequest) (model.MCPInstallResult, error) {
+	return a.InstallMCPToApps(payload)
+}
+
+func (a *App) GetMCPInstallTemplate() (string, error) {
+	if err := a.ensureReady(); err != nil {
+		return "", err
+	}
+	url := ""
+	if a.mcpServer != nil {
+		url = a.mcpServer.BaseURL()
+	}
+	return mcpinstall.BuildInstallJSON(url)
+}
+
+func (a *App) startMCPHTTPServer() error {
+	if a.storage == nil {
+		return fmt.Errorf("storage unavailable")
+	}
+	cfg, err := a.storage.Load()
+	if err != nil {
+		return err
+	}
+
+	port := cfg.SSHPilot.MCPHTTPPort
+	if port <= 0 {
+		port = 39200
+	}
+	token := strings.TrimSpace(cfg.SSHPilot.MCPHTTPToken)
+	if token == "" {
+		token = randomHex(16)
+		_, _ = a.storage.Update(func(c *conf.Config) error {
+			c.SSHPilot.MCPHTTPToken = token
+			if c.SSHPilot.MCPHTTPPort <= 0 {
+				c.SSHPilot.MCPHTTPPort = port
+			}
+			return nil
+		})
+	}
+
+	server, err := mcphttp.Start("127.0.0.1", port, token, func(command string) (bool, string, string, error) {
+		result, callErr := a.ExecuteSSHPilotCommand(command)
+		if callErr != nil {
+			return false, "", "", callErr
+		}
+		return result.Success, result.Output, result.Error, nil
+	})
+	if err != nil {
+		return err
+	}
+	a.mcpServer = server
+	slog.Info("mcp http server started", "url", server.BaseURL())
+	return nil
+}
+
+func randomHex(bytesN int) string {
+	if bytesN <= 0 {
+		bytesN = 16
+	}
+	buf := make([]byte, bytesN)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }
 
 func (a *App) GetMachineID() (string, error) {

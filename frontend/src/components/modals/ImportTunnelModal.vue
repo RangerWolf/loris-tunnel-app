@@ -709,6 +709,9 @@ watch(
             class="form-control ssh-command-textarea"
             rows="4"
             :placeholder="$t('app.modals.importTunnel.sshCommandPlaceholder')"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
           />
           <div class="d-flex justify-content-end mt-2">
             <button type="button" class="btn btn-outline-primary parse-btn" @click="handleParse">

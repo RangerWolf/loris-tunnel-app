@@ -1,6 +1,7 @@
 package forward
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -785,6 +786,35 @@ func dialSSH(jumper model.Jumper) (*ssh.Client, error) {
 		return nil, fmt.Errorf("ssh dial %s failed: %w", addr, err)
 	}
 	return client, nil
+}
+
+// ExecuteRemoteCommand runs one shell command on the last hop of an SSH chain.
+func ExecuteRemoteCommand(jumpers []model.Jumper, command string) (string, string, error) {
+	if strings.TrimSpace(command) == "" {
+		return "", "", fmt.Errorf("command is required")
+	}
+
+	client, closeChain, err := dialSSHChain(jumpers)
+	if err != nil {
+		return "", "", err
+	}
+	defer closeChain()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return "", "", fmt.Errorf("create ssh session failed: %w", err)
+	}
+	defer session.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+
+	if err := session.Run(command); err != nil {
+		return stdout.String(), stderr.String(), err
+	}
+	return stdout.String(), stderr.String(), nil
 }
 
 func dialSSHChain(jumpers []model.Jumper) (*ssh.Client, func(), error) {

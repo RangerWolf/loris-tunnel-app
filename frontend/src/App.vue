@@ -10,6 +10,7 @@ import {
   GetAutoRunEnabled,
   GetLicenseStatus as GetLicenseStatusAPI,
   GetSSHConfigImportSources,
+  GetSSHPilotState,
   GetStoredLicenseCode,
   GetState,
   LoadSSHConfigJumpersByPath,
@@ -20,6 +21,7 @@ import {
   TestTunnelConnection as TestTunnelConnectionAPI,
   ToggleTunnel,
   UpdateJumper,
+  UpdateSSHPilotSettings,
   UpdateTunnel
 } from '../wailsjs/go/main/App'
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
@@ -28,6 +30,7 @@ import AppTopHeader from './components/layout/AppTopHeader.vue'
 import OverviewPage from './components/pages/OverviewPage.vue'
 import JumpersPage from './components/pages/JumpersPage.vue'
 import TunnelsPage from './components/pages/TunnelsPage.vue'
+import SshPilotPage from './components/pages/SshPilotPage.vue'
 import LogsPage from './components/pages/LogsPage.vue'
 import ConfigPage from './components/pages/ConfigPage.vue'
 import JumperModal from './components/modals/JumperModal.vue'
@@ -42,6 +45,7 @@ const pages = computed(() => [
   { key: 'overview', title: t('app.sidebar.overview'), subtitle: t('app.sidebar.overviewSubtitle') },
   { key: 'jumpers', title: t('app.sidebar.jumpers'), subtitle: t('app.sidebar.jumpersSubtitle') },
   { key: 'tunnels', title: t('app.sidebar.tunnels'), subtitle: t('app.sidebar.tunnelsSubtitle') },
+  { key: 'ssh-pilot', title: t('app.sidebar.sshPilot'), subtitle: t('app.sidebar.sshPilotSubtitle'), beta: true },
   { key: 'logs', title: t('app.sidebar.logs'), subtitle: t('app.sidebar.logsSubtitle') },
   { key: 'config', title: t('app.sidebar.config'), subtitle: t('app.sidebar.configSubtitle') }
 ])
@@ -80,7 +84,7 @@ const CONFIG_TOAST_DURATION_MS = 3800
 let configToastTimer = null
 
 const appMeta = reactive({
-  version: '0.22.3-alpha'
+  version: '0.23.1-alpha'
 })
 const proLicense = reactive({
   isPro: false,
@@ -118,6 +122,12 @@ watch(configMessage, (message) => {
   }, CONFIG_TOAST_DURATION_MS)
 })
 
+watch(activePage, (pageKey) => {
+  if (pageKey === 'ssh-pilot') {
+    void loadSSHPilotState({ silent: true })
+  }
+})
+
 const jumpers = ref([])
 const tunnels = ref([])
 const jumperSearchQuery = ref('')
@@ -130,6 +140,18 @@ let stateSyncInFlight = false
 const logs = ref([
   { id: 1, level: 'info', time: nowLabel(), message: 'Config storage mode: TOML' }
 ])
+const sshPilotState = ref({
+  enabled: false,
+  connected: false,
+  selectedJumperId: 0,
+  selectedJumperName: '',
+  protocol: 'go-mcp (execute_bash)',
+  lastError: '',
+  customCommands: [],
+  allowedCommands: [],
+  logs: []
+})
+const sshPilotBusy = ref(false)
 
 const showJumperModal = ref(false)
 const showTunnelModal = ref(false)
@@ -441,6 +463,20 @@ function errorMessage(err, fallback = 'Operation failed.') {
   return fallback
 }
 
+function applySSHPilotState(state) {
+  sshPilotState.value = {
+    enabled: !!state?.enabled,
+    connected: !!state?.connected,
+    selectedJumperId: Number(state?.selectedJumperId || 0),
+    selectedJumperName: String(state?.selectedJumperName || ''),
+    protocol: String(state?.protocol || 'go-mcp (execute_bash)'),
+    lastError: String(state?.lastError || ''),
+    customCommands: Array.isArray(state?.customCommands) ? state.customCommands : [],
+    allowedCommands: Array.isArray(state?.allowedCommands) ? state.allowedCommands : [],
+    logs: Array.isArray(state?.logs) ? state.logs : []
+  }
+}
+
 async function loadStateFromBackend(options = {}) {
   const { silent = false } = options
   try {
@@ -468,6 +504,38 @@ async function loadStateFromBackend(options = {}) {
     const message = errorMessage(err, 'Failed to load config from backend.')
     configMessage.value = message
     logEvent('error', message)
+  }
+}
+
+async function loadSSHPilotState(options = {}) {
+  const { silent = false } = options
+  try {
+    const state = await GetSSHPilotState()
+    applySSHPilotState(state)
+  } catch (err) {
+    if (silent) return
+    const message = errorMessage(err, 'Failed to load SSH Pilot state.')
+    configMessage.value = message
+    logEvent('error', message)
+  }
+}
+
+async function updateSSHPilotSettings(payload) {
+  sshPilotBusy.value = true
+  try {
+    const state = await UpdateSSHPilotSettings({
+      enabled: !!payload?.enabled,
+      selectedJumperId: Number(payload?.selectedJumperId || 0),
+      customCommands: Array.isArray(payload?.customCommands) ? payload.customCommands : []
+    })
+    applySSHPilotState(state)
+    logEvent('info', `SSH Pilot updated (enabled=${sshPilotState.value.enabled}, jumper=${sshPilotState.value.selectedJumperName || '--'})`)
+  } catch (err) {
+    const message = errorMessage(err, 'Failed to update SSH Pilot settings.')
+    configMessage.value = message
+    logEvent('error', message)
+  } finally {
+    sshPilotBusy.value = false
   }
 }
 
@@ -1436,6 +1504,7 @@ function deleteJumper(jumper) {
 
 onMounted(async () => {
   await loadStateFromBackend()
+  await loadSSHPilotState({ silent: true })
   try {
     await SaveUILocale(locale.value)
   } catch (_) {
@@ -1546,6 +1615,15 @@ watch(
           @copy-tunnel="copyTunnel"
           @edit-tunnel="editTunnel"
           @delete-tunnel="deleteTunnel"
+        />
+
+        <SshPilotPage
+          v-if="activePage === 'ssh-pilot'"
+          :jumpers="jumpers"
+          :state="sshPilotState"
+          :busy="sshPilotBusy"
+          @refresh="loadSSHPilotState"
+          @update-settings="updateSSHPilotSettings"
         />
 
         <LogsPage

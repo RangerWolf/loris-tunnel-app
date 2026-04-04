@@ -44,15 +44,24 @@ func getDefaultConfigDir() string {
 
 // Config is persisted in TOML storage.
 type Config struct {
-	Version int            `toml:"version"`
-	Jumpers []model.Jumper `toml:"jumpers"`
-	Tunnels []model.Tunnel `toml:"tunnels"`
-	AutoRun bool           `toml:"auto_run"`
-	License LicenseConfig  `toml:"license"`
+	Version  int            `toml:"version"`
+	Jumpers  []model.Jumper `toml:"jumpers"`
+	Tunnels  []model.Tunnel `toml:"tunnels"`
+	AutoRun  bool           `toml:"auto_run"`
+	License  LicenseConfig  `toml:"license"`
+	SSHPilot SSHPilotConfig `toml:"ssh_pilot"`
 }
 
 type LicenseConfig struct {
 	Code string `toml:"code"`
+}
+
+type SSHPilotConfig struct {
+	Enabled          bool     `toml:"enabled"`
+	SelectedJumperID int      `toml:"selected_jumper_id"`
+	MCPHTTPPort      int      `toml:"mcp_http_port"`
+	MCPHTTPToken     string   `toml:"mcp_http_token"`
+	CustomCommands   []string `toml:"custom_commands"`
 }
 
 // GetHomeConfigPath returns the absolute path for the home config file
@@ -93,11 +102,12 @@ func ResolveConfigPath() string {
 // DefaultConfig creates an empty config.
 func DefaultConfig() *Config {
 	return &Config{
-		Version: currentConfigVersion,
-		Jumpers: []model.Jumper{},
-		Tunnels: []model.Tunnel{},
-		AutoRun: false,
-		License: LicenseConfig{},
+		Version:  currentConfigVersion,
+		Jumpers:  []model.Jumper{},
+		Tunnels:  []model.Tunnel{},
+		AutoRun:  false,
+		License:  LicenseConfig{},
+		SSHPilot: SSHPilotConfig{},
 	}
 }
 
@@ -107,9 +117,10 @@ func (c *Config) Clone() *Config {
 		return DefaultConfig()
 	}
 
-	out := &Config{Version: c.Version, AutoRun: c.AutoRun, License: c.License}
+	out := &Config{Version: c.Version, AutoRun: c.AutoRun, License: c.License, SSHPilot: c.SSHPilot}
 	out.Jumpers = append(out.Jumpers, c.Jumpers...)
 	out.Tunnels = append(out.Tunnels, c.Tunnels...)
+	out.SSHPilot.CustomCommands = append([]string{}, c.SSHPilot.CustomCommands...)
 	return out
 }
 
@@ -125,10 +136,38 @@ func (c *Config) Normalize() {
 		c.Tunnels = []model.Tunnel{}
 	}
 	c.License.Code = strings.TrimSpace(c.License.Code)
+	if c.SSHPilot.SelectedJumperID < 0 {
+		c.SSHPilot.SelectedJumperID = 0
+	}
+	if c.SSHPilot.MCPHTTPPort <= 0 {
+		c.SSHPilot.MCPHTTPPort = 39200
+	}
+	c.SSHPilot.MCPHTTPToken = strings.TrimSpace(c.SSHPilot.MCPHTTPToken)
+	c.SSHPilot.CustomCommands = normalizeSSHPilotCommands(c.SSHPilot.CustomCommands)
 	// AutoRun defaults to false; no need to set if already present
 	for i := range c.Tunnels {
 		c.Tunnels[i].JumperIDs = normalizeJumperIDs(c.Tunnels[i].JumperIDs)
 	}
+}
+
+func normalizeSSHPilotCommands(commands []string) []string {
+	if len(commands) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(commands))
+	seen := make(map[string]struct{}, len(commands))
+	for _, raw := range commands {
+		cmd := strings.TrimSpace(raw)
+		if cmd == "" {
+			continue
+		}
+		if _, ok := seen[cmd]; ok {
+			continue
+		}
+		seen[cmd] = struct{}{}
+		out = append(out, cmd)
+	}
+	return out
 }
 
 func normalizeJumperIDs(ids []int) []int {

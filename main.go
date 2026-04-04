@@ -7,12 +7,12 @@ import (
 	"runtime"
 
 	"github.com/energye/systray"
-	"loris-tunnel/internal/traytext"
-	"loris-tunnel/internal/uilocale"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"loris-tunnel/internal/traytext"
+	"loris-tunnel/internal/uilocale"
 )
 
 //go:embed all:frontend/dist

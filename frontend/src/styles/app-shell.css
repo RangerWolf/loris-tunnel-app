@@ -71,6 +71,25 @@
   padding: 0.54rem 0.66rem;
 }
 
+.nav-item-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+}
+
+.nav-beta-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 0.36rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: #0d5bd4;
+  background: #e4efff;
+  border: 1px solid #c7dbfe;
+}
+
 .btn.nav-item-btn:hover {
   background: var(--lt-accent-hover);
 }
