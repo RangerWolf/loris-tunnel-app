@@ -4,14 +4,17 @@ Explore in-depth articles, tutorials, and best practices for managing SSH tunnel
 
 ## Featured Content
 
-### [Introduction to Loris Tunnel](./introduction)
+### [Introduction to Loris Tunnel](./20260316-introduction)
 A comprehensive guide to getting started with Loris Tunnel, covering its core features and benefits.
 
-### [OpenClaw Remote Gateway + SSH Tunnels](./openclaw-remote-gateway-ssh-tunnel)
+### [OpenClaw Remote Gateway + SSH Tunnels](./20260329-openclaw-remote-gateway-ssh-tunnel)
 How to pair OpenClaw’s remote gateway with Loris Tunnel for stable local port forwarding, auto-reconnect, and a desktop-first workflow.
 
-### [Codex SSH Login on Remote Servers](./codex-ssh-login-with-loris-tunnel)
+### [Codex SSH Login on Remote Servers](./20260331-codex-ssh-login-with-loris-tunnel)
 A practical guide for the `codex ssh` login callback issue on remote servers, based on issue #2668 and improved with Loris Tunnel tunnel management.
+
+### [Cherry Studio, Codex & SSH MCP (SSH Pilot)](./20260405-cherry-studio-codex-ssh-mcp-pilot)
+Use the Model Context Protocol over SSH for read-only `execute_bash` against jump hosts—whitelist validation, MCP call logs, and screenshots of SSH Pilot plus Cherry Studio.
 
 ## Upcoming Topics
 

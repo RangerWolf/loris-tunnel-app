@@ -44,7 +44,7 @@ Loris Tunnel is built for exactly this class of problem: **long-lived SSH port f
 | SOCKS or other forwards | **Local, remote, and dynamic (SOCKS5)** modes in one app. |
 
 ::: tip Map your existing SSH config
-If you already use `LocalForward 18789 127.0.0.1:18789`, you can often **paste the equivalent `ssh` command** into Loris Tunnel’s importer and adjust labels, jumpers, and auto-start from there. See the [introduction](./introduction) for the full feature tour.
+If you already use `LocalForward 18789 127.0.0.1:18789`, you can often **paste the equivalent `ssh` command** into Loris Tunnel’s importer and adjust labels, jumpers, and auto-start from there. See the [introduction](./20260316-introduction) for the full feature tour.
 :::
 
 ## A practical mental model
@@ -62,7 +62,7 @@ If you already use `LocalForward 18789 127.0.0.1:18789`, you can often **paste t
 ## Get Loris Tunnel
 
 - **Releases**: [GitHub — loris-tunnel-app](https://github.com/RangerWolf/loris-tunnel-app/releases)
-- **Product overview**: [Introduction to Loris Tunnel](./introduction)
+- **Product overview**: [Introduction to Loris Tunnel](./20260316-introduction)
 
 ::: info About OpenClaw
 OpenClaw, its gateway, and port conventions are documented on **[openclaws.io](https://openclaws.io/)**. Loris Tunnel is an independent SSH tunnel manager; pairing them is a common operational pattern, not a bundled vendor integration.

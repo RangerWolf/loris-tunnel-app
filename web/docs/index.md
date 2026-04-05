@@ -14,7 +14,7 @@ hero:
       link: https://github.com/RangerWolf/loris-tunnel-app/releases
     - theme: alt
       text: Learn More
-      link: /articles/introduction
+      link: /articles/20260316-introduction
 
 features:
   - title: Graphical management
