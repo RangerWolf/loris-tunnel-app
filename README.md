@@ -34,6 +34,7 @@ Designed for developers and ops engineers who frequently work with remote server
 - ⛓️ **Multi-hop jumper chains** — configure multiple SSH jumper servers per tunnel for deeply nested networks (e.g. bastion → internal host)
 - 🔀 **Local, remote and dynamic (SOCKS5) port forwarding** — all standard SSH tunnel modes supported
 - ✅ **Built-in connection test** — verify a tunnel is reachable before saving, directly from the create/edit dialog
+- 🧠 **AI Debug for failed connections** — when a jumper or tunnel test fails, run one-click AI analysis to get likely root causes and actionable fix suggestions
 - ▶️ **Auto-start tunnels on launch** — mark tunnels to open automatically when the app starts
 - 🌍 **Cross-platform** — macOS and Windows supported
 - 💬 **Multi-language UI** — English and 简体中文
