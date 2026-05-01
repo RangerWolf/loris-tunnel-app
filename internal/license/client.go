@@ -154,6 +154,53 @@ func (c *Client) Redeem(ctx context.Context, machineID, code string) (model.Lice
 	return result, nil
 }
 
+func (c *Client) ReportUsageEvent(ctx context.Context, payload model.UsageEventRequest) (model.UsageEventResponse, error) {
+	if c == nil {
+		return model.UsageEventResponse{}, fmt.Errorf("license client is nil")
+	}
+	payload.MachineID = strings.TrimSpace(payload.MachineID)
+	payload.EventType = strings.TrimSpace(payload.EventType)
+	if payload.MachineID == "" {
+		return model.UsageEventResponse{}, fmt.Errorf("machine_id is empty")
+	}
+	if payload.EventType == "" {
+		return model.UsageEventResponse{}, fmt.Errorf("event_type is empty")
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return model.UsageEventResponse{}, fmt.Errorf("marshal usage event payload failed: %w", err)
+	}
+
+	path := c.baseURL + "/client/usage/events"
+	req, err := http.NewRequestWithContext(ensureContext(ctx), http.MethodPost, path, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return model.UsageEventResponse{}, fmt.Errorf("create usage event request failed: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return model.UsageEventResponse{}, fmt.Errorf("request usage event failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return model.UsageEventResponse{}, fmt.Errorf("read usage event response failed: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return model.UsageEventResponse{}, buildAPIError(resp.StatusCode, body, "usage event request failed")
+	}
+
+	var result model.UsageEventResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return model.UsageEventResponse{}, fmt.Errorf("parse usage event response failed: %w", err)
+	}
+	return result, nil
+}
+
 func ensureContext(ctx context.Context) context.Context {
 	if ctx != nil {
 		return ctx

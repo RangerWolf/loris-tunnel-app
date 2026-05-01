@@ -7,10 +7,12 @@ import {
   CreateTunnel,
   DeleteJumper,
   DeleteTunnel,
+  DebugJumperFailure as DebugJumperFailureAPI,
+  DebugSavedTunnelFailure as DebugSavedTunnelFailureAPI,
+  DebugTunnelFailure as DebugTunnelFailureAPI,
   GetAutoRunEnabled,
   GetLicenseStatus as GetLicenseStatusAPI,
   GetSSHConfigImportSources,
-  GetSSHPilotState,
   GetStoredLicenseCode,
   GetState,
   LoadSSHConfigJumpersByPath,
@@ -21,18 +23,18 @@ import {
   TestTunnelConnection as TestTunnelConnectionAPI,
   ToggleTunnel,
   UpdateJumper,
-  UpdateSSHPilotSettings,
   UpdateTunnel
 } from '../wailsjs/go/main/App'
 import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
+import { trackAppStart, trackPageView, trackButtonClick, trackModalOpen, trackModalClose, trackTunnelAction, trackJumperAction } from './utils/analytics'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import AppTopHeader from './components/layout/AppTopHeader.vue'
 import OverviewPage from './components/pages/OverviewPage.vue'
 import JumpersPage from './components/pages/JumpersPage.vue'
 import TunnelsPage from './components/pages/TunnelsPage.vue'
-import SshPilotPage from './components/pages/SshPilotPage.vue'
 import LogsPage from './components/pages/LogsPage.vue'
 import ConfigPage from './components/pages/ConfigPage.vue'
+import AIDebugModal from './components/common/AIDebugModal.vue'
 import JumperModal from './components/modals/JumperModal.vue'
 import ImportJumperModal from './components/modals/ImportJumperModal.vue'
 import TunnelModal from './components/modals/TunnelModal.vue'
@@ -42,12 +44,11 @@ import './styles/app-shell.css'
 const { t, locale } = useI18n()
 
 const pages = computed(() => [
-  { key: 'overview', title: t('app.sidebar.overview'), subtitle: t('app.sidebar.overviewSubtitle') },
-  { key: 'jumpers', title: t('app.sidebar.jumpers'), subtitle: t('app.sidebar.jumpersSubtitle') },
-  { key: 'tunnels', title: t('app.sidebar.tunnels'), subtitle: t('app.sidebar.tunnelsSubtitle') },
-  { key: 'ssh-pilot', title: t('app.sidebar.sshPilot'), subtitle: t('app.sidebar.sshPilotSubtitle'), beta: true },
-  { key: 'logs', title: t('app.sidebar.logs'), subtitle: t('app.sidebar.logsSubtitle') },
-  { key: 'config', title: t('app.sidebar.config'), subtitle: t('app.sidebar.configSubtitle') }
+  { key: 'overview', title: t('app.sidebar.overview'), subtitle: t('app.sidebar.overviewSubtitle'), icon: 'bi-speedometer2' },
+  { key: 'jumpers', title: t('app.sidebar.jumpers'), subtitle: t('app.sidebar.jumpersSubtitle'), icon: 'bi-hdd-network' },
+  { key: 'tunnels', title: t('app.sidebar.tunnels'), subtitle: t('app.sidebar.tunnelsSubtitle'), icon: 'bi-diagram-3' },
+  { key: 'logs', title: t('app.sidebar.logs'), subtitle: t('app.sidebar.logsSubtitle'), icon: 'bi-journal-text' },
+  { key: 'config', title: t('app.sidebar.config'), subtitle: t('app.sidebar.configSubtitle'), icon: 'bi-sliders2' }
 ])
 
 const modeOptions = computed(() => [
@@ -63,7 +64,9 @@ const authOptions = computed(() => [
 ])
 
 const savedTheme = typeof window !== 'undefined' ? window.localStorage.getItem('lt.theme') : null
+const savedSidebarCollapsed = typeof window !== 'undefined' ? window.localStorage.getItem('lt.sidebar.collapsed') : null
 const theme = ref(savedTheme === 'dark' ? 'dark' : 'light')
+const sidebarCollapsed = ref(savedSidebarCollapsed === '1')
 const activePage = ref('overview')
 const selectedLogLevel = ref('all')
 const configMessage = ref('')
@@ -84,8 +87,9 @@ const CONFIG_TOAST_DURATION_MS = 3800
 let configToastTimer = null
 
 const appMeta = reactive({
-  version: '0.23.1-alpha'
+  version: '0.24.5-alpha'
 })
+const hasNewVersion = ref(false)
 const proLicense = reactive({
   isPro: false,
   expiresAt: '',
@@ -107,6 +111,16 @@ watch(theme, (newTheme) => {
   }
 })
 
+watch(sidebarCollapsed, (collapsed) => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem('lt.sidebar.collapsed', collapsed ? '1' : '0')
+  }
+})
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
 watch(configMessage, (message) => {
   if (!message) {
     hideConfigToast()
@@ -123,9 +137,7 @@ watch(configMessage, (message) => {
 })
 
 watch(activePage, (pageKey) => {
-  if (pageKey === 'ssh-pilot') {
-    void loadSSHPilotState({ silent: true })
-  }
+  trackPageView(pageKey, appMeta.version)
 })
 
 const jumpers = ref([])
@@ -140,18 +152,6 @@ let stateSyncInFlight = false
 const logs = ref([
   { id: 1, level: 'info', time: nowLabel(), message: 'Config storage mode: TOML' }
 ])
-const sshPilotState = ref({
-  enabled: false,
-  connected: false,
-  selectedJumperId: 0,
-  selectedJumperName: '',
-  protocol: 'go-mcp (execute_bash)',
-  lastError: '',
-  customCommands: [],
-  allowedCommands: [],
-  logs: []
-})
-const sshPilotBusy = ref(false)
 
 const showJumperModal = ref(false)
 const showTunnelModal = ref(false)
@@ -192,12 +192,18 @@ const redeemDialog = reactive({
 })
 const jumperTest = reactive({
   status: 'idle',
-  message: ''
+  message: '',
+  debuggable: false
 })
 const tunnelTest = reactive({
   status: 'idle',
-  message: ''
+  message: '',
+  debuggable: false
 })
+const jumperAiDebug = reactive(defaultAIDebugState())
+const tunnelAiDebug = reactive(defaultAIDebugState())
+const tunnelErrorAiDebugStates = reactive({})
+const selectedAIDebugTunnel = ref(null)
 
 const JUMPER_LIMITS = {
   name: 20,
@@ -225,6 +231,18 @@ const autoStartTunnels = computed(() => tunnels.value.filter((tunnel) => tunnel.
 const filteredLogs = computed(() => {
   if (selectedLogLevel.value === 'all') return logs.value
   return logs.value.filter((log) => log.level === selectedLogLevel.value)
+})
+const selectedAIDebugTunnelState = computed(() => {
+  if (!selectedAIDebugTunnel.value?.id) return defaultAIDebugState()
+  return ensureTunnelErrorAIDebugState(selectedAIDebugTunnel.value.id)
+})
+const selectedAIDebugTunnelTitle = computed(() => {
+  const name = selectedAIDebugTunnel.value?.name || t('app.aiDebug.savedTunnelFallback')
+  return t('app.aiDebug.modalTitle', { name })
+})
+const selectedAIDebugTunnelSubtitle = computed(() => {
+  if (!selectedAIDebugTunnel.value) return ''
+  return getTunnelJumperLabel(selectedAIDebugTunnel.value)
 })
 
 const filteredJumpers = computed(() => {
@@ -317,6 +335,14 @@ function defaultInlineJumperForm() {
     keepAliveIntervalMs: 5000,
     timeoutMs: 5000,
     notes: ''
+  }
+}
+
+function defaultAIDebugState() {
+  return {
+    status: 'idle',
+    error: '',
+    result: null
   }
 }
 
@@ -463,18 +489,18 @@ function errorMessage(err, fallback = 'Operation failed.') {
   return fallback
 }
 
-function applySSHPilotState(state) {
-  sshPilotState.value = {
-    enabled: !!state?.enabled,
-    connected: !!state?.connected,
-    selectedJumperId: Number(state?.selectedJumperId || 0),
-    selectedJumperName: String(state?.selectedJumperName || ''),
-    protocol: String(state?.protocol || 'go-mcp (execute_bash)'),
-    lastError: String(state?.lastError || ''),
-    customCommands: Array.isArray(state?.customCommands) ? state.customCommands : [],
-    allowedCommands: Array.isArray(state?.allowedCommands) ? state.allowedCommands : [],
-    logs: Array.isArray(state?.logs) ? state.logs : []
+function aiDebugErrorMessage(err, fallback = 'AI Debug failed.') {
+  const message = errorMessage(err, fallback)
+  if (/quota exceeded|daily quota/i.test(message)) {
+    return t('app.aiDebug.quotaExceeded', { freeLimit: 10, proLimit: 200 })
   }
+  if (/AI_PROVIDER_BUSY|rate limited|rate_limit_exceeded/i.test(message)) {
+    return t('app.aiDebug.providerBusy')
+  }
+  if (/HTTP 5\d\d|cannot connect|connection refused|timeout|not configured|provider request failed|backend/i.test(message)) {
+    return t('app.aiDebug.unavailable')
+  }
+  return message
 }
 
 async function loadStateFromBackend(options = {}) {
@@ -483,6 +509,17 @@ async function loadStateFromBackend(options = {}) {
     const state = await GetState()
     jumpers.value = Array.isArray(state?.jumpers) ? state.jumpers : []
     const backendTunnels = (Array.isArray(state?.tunnels) ? state.tunnels : []).map(normalizeTunnelFromBackend)
+    const validTunnelIds = new Set(backendTunnels.map((item) => String(item.id)))
+    Object.keys(tunnelErrorAiDebugStates).forEach((key) => {
+      if (!validTunnelIds.has(key)) {
+        delete tunnelErrorAiDebugStates[key]
+      }
+    })
+    backendTunnels.forEach((item) => {
+      if (item.status !== 'error' || !item.lastError) {
+        delete tunnelErrorAiDebugStates[String(item.id)]
+      }
+    })
 
     if (pendingToggleTunnelIds.size === 0) {
       tunnels.value = backendTunnels
@@ -507,38 +544,6 @@ async function loadStateFromBackend(options = {}) {
   }
 }
 
-async function loadSSHPilotState(options = {}) {
-  const { silent = false } = options
-  try {
-    const state = await GetSSHPilotState()
-    applySSHPilotState(state)
-  } catch (err) {
-    if (silent) return
-    const message = errorMessage(err, 'Failed to load SSH Pilot state.')
-    configMessage.value = message
-    logEvent('error', message)
-  }
-}
-
-async function updateSSHPilotSettings(payload) {
-  sshPilotBusy.value = true
-  try {
-    const state = await UpdateSSHPilotSettings({
-      enabled: !!payload?.enabled,
-      selectedJumperId: Number(payload?.selectedJumperId || 0),
-      customCommands: Array.isArray(payload?.customCommands) ? payload.customCommands : []
-    })
-    applySSHPilotState(state)
-    logEvent('info', `SSH Pilot updated (enabled=${sshPilotState.value.enabled}, jumper=${sshPilotState.value.selectedJumperName || '--'})`)
-  } catch (err) {
-    const message = errorMessage(err, 'Failed to update SSH Pilot settings.')
-    configMessage.value = message
-    logEvent('error', message)
-  } finally {
-    sshPilotBusy.value = false
-  }
-}
-
 function syncStateSilently() {
   if (stateSyncInFlight) return
   stateSyncInFlight = true
@@ -553,6 +558,7 @@ function switchPage(pageKey) {
 
 function setThemeBySwitch(enabled) {
   theme.value = enabled ? 'dark' : 'light'
+  trackButtonClick('theme_switch', 'config', { theme: theme.value })
   logEvent('info', `Theme switched to ${theme.value}`)
 }
 
@@ -615,6 +621,7 @@ async function loadStoredLicenseCode() {
 async function checkForUpdates() {
   if (isCheckingUpdates.value) return
   isCheckingUpdates.value = true
+  trackButtonClick('check_updates', 'config')
   try {
     const result = await CheckForUpdatesAPI(appMeta.version)
 
@@ -624,10 +631,12 @@ async function checkForUpdates() {
       updateCheckDialog.latestVersion = ''
       updateCheckDialog.message = ''
       updateCheckDialog.visible = true
+      hasNewVersion.value = false
       logEvent('info', 'No updates available')
       return
     }
 
+    hasNewVersion.value = true
     releasePageUrl.value = String(result.releasePageUrl || DEFAULT_RELEASES_PAGE_URL).trim() || DEFAULT_RELEASES_PAGE_URL
     updateCheckDialog.mode = 'updateAvailable'
     updateCheckDialog.latestVersion = String(result.latestVersion || '').trim()
@@ -644,9 +653,22 @@ async function checkForUpdates() {
     updateCheckDialog.latestVersion = ''
     updateCheckDialog.message = message
     updateCheckDialog.visible = true
+    hasNewVersion.value = false
     logEvent('error', message)
   } finally {
     isCheckingUpdates.value = false
+  }
+}
+
+async function checkForUpdatesSilently() {
+  try {
+    const result = await CheckForUpdatesAPI(appMeta.version)
+    if (result?.hasUpdate) {
+      hasNewVersion.value = true
+      releasePageUrl.value = String(result.releasePageUrl || DEFAULT_RELEASES_PAGE_URL).trim() || DEFAULT_RELEASES_PAGE_URL
+    }
+  } catch (_) {
+    // silent check, ignore errors
   }
 }
 
@@ -680,11 +702,60 @@ function resetInlineJumperValidation() {
 function resetJumperTest() {
   jumperTest.status = 'idle'
   jumperTest.message = ''
+  jumperTest.debuggable = false
 }
 
 function resetTunnelTest() {
   tunnelTest.status = 'idle'
   tunnelTest.message = ''
+  tunnelTest.debuggable = false
+}
+
+function resetAIDebugState(state) {
+  state.status = 'idle'
+  state.error = ''
+  state.result = null
+}
+
+function ensureTunnelErrorAIDebugState(tunnelId) {
+  const key = String(tunnelId)
+  if (!tunnelErrorAiDebugStates[key]) {
+    tunnelErrorAiDebugStates[key] = defaultAIDebugState()
+  }
+  return tunnelErrorAiDebugStates[key]
+}
+
+function setAIDebugLoading(state) {
+  state.status = 'analyzing'
+  state.error = ''
+  state.result = null
+}
+
+function setAIDebugResult(state, result) {
+  state.status = 'success'
+  state.error = ''
+  state.result = result || null
+}
+
+function setAIDebugError(state, message) {
+  state.status = 'error'
+  state.error = message
+  state.result = null
+}
+
+function buildTunnelPayloadForTest() {
+  return {
+    name: tunnelForm.name.trim(),
+    mode: tunnelForm.mode,
+    jumperIds: normalizeJumperIdList(tunnelForm.jumperIds),
+    localHost: tunnelForm.localHost.trim(),
+    localPort: Number(tunnelForm.localPort),
+    remoteHost: tunnelForm.remoteHost.trim(),
+    remotePort: Number(tunnelForm.remotePort),
+    autoStart: !!tunnelForm.autoStart,
+    status: 'stopped',
+    description: tunnelForm.description.trim()
+  }
 }
 
 function buildJumperPayload(form) {
@@ -763,7 +834,9 @@ function openNewJumper() {
   showJumperAdvanced.value = false
   resetJumperValidation()
   resetJumperTest()
+  resetAIDebugState(jumperAiDebug)
   showJumperModal.value = true
+  trackModalOpen('jumper_create', 'jumpers')
 }
 
 async function loadImportJumperSources() {
@@ -800,6 +873,7 @@ async function loadImportJumpers() {
 
 function openImportJumper() {
   showImportJumperModal.value = true
+  trackModalOpen('jumper_import', 'jumpers')
   importJumperLoading.value = false
   importJumperError.value = ''
   importJumperHasLoaded.value = false
@@ -824,7 +898,9 @@ function editJumper(jumper) {
   showJumperAdvanced.value = false
   resetJumperValidation()
   resetJumperTest()
+  resetAIDebugState(jumperAiDebug)
   showJumperModal.value = true
+  trackModalOpen('jumper_edit', 'jumpers', { jumper_name: jumper.name })
 }
 
 function fillJumperFormFromJumper(jumper, nameOverride = null) {
@@ -851,6 +927,7 @@ function copyJumper(jumper) {
   showJumperAdvanced.value = false
   resetJumperValidation()
   resetJumperTest()
+  resetAIDebugState(jumperAiDebug)
   showJumperModal.value = true
 }
 
@@ -935,11 +1012,13 @@ async function importJumpers(jumpersToImport) {
 
 async function testJumperConnection() {
   resetJumperValidation()
+  resetAIDebugState(jumperAiDebug)
   const payload = buildJumperPayload(jumperForm)
   const error = validateJumperPayload(payload)
   if (error) {
     jumperTest.status = 'error'
     jumperTest.message = error
+    jumperTest.debuggable = false
     return
   }
 
@@ -950,10 +1029,12 @@ async function testJumperConnection() {
     await TestJumperConnectionAPI(payload)
     jumperTest.status = 'success'
     jumperTest.message = 'Connection test passed.'
+    jumperTest.debuggable = false
     logEvent('info', `Connection test passed for jumper ${payload.name}`)
   } catch (err) {
     jumperTest.status = 'error'
     jumperTest.message = errorMessage(err)
+    jumperTest.debuggable = true
     logEvent('error', `Connection test failed for jumper ${payload.name}: ${jumperTest.message}`)
   }
 }
@@ -961,6 +1042,7 @@ async function testJumperConnection() {
 async function testTunnelConnection() {
   resetInlineJumperValidation()
   tunnelValidationError.value = ''
+  resetAIDebugState(tunnelAiDebug)
 
   let inlinePayload = null
   let selectedJumperIds = normalizeJumperIdList(tunnelForm.jumperIds)
@@ -971,6 +1053,7 @@ async function testTunnelConnection() {
     if (inlineError) {
       tunnelTest.status = 'error'
       tunnelTest.message = `[Jumper] ${inlineError}`
+      tunnelTest.debuggable = false
       return
     }
   }
@@ -978,30 +1061,23 @@ async function testTunnelConnection() {
   if (!selectedJumperIds.length && !inlinePayload) {
     tunnelTest.status = 'error'
     tunnelTest.message = 'Please select at least one jumper.'
+    tunnelTest.debuggable = false
     return
   }
 
-  const payload = {
-    name: tunnelForm.name.trim(),
-    mode: tunnelForm.mode,
-    jumperIds: selectedJumperIds,
-    localHost: tunnelForm.localHost.trim(),
-    localPort: Number(tunnelForm.localPort),
-    remoteHost: tunnelForm.remoteHost.trim(),
-    remotePort: Number(tunnelForm.remotePort),
-    autoStart: !!tunnelForm.autoStart,
-    status: 'stopped',
-    description: tunnelForm.description.trim()
-  }
+  const payload = buildTunnelPayloadForTest()
+  payload.jumperIds = selectedJumperIds
 
   if (!payload.name || !payload.localHost || !payload.localPort) {
     tunnelTest.status = 'error'
     tunnelTest.message = 'Please fill in required fields.'
+    tunnelTest.debuggable = false
     return
   }
   if (payload.mode !== 'dynamic' && (!payload.remoteHost || !payload.remotePort)) {
     tunnelTest.status = 'error'
     tunnelTest.message = 'Please fill in required remote host/port.'
+    tunnelTest.debuggable = false
     return
   }
 
@@ -1013,12 +1089,87 @@ async function testTunnelConnection() {
     const latencyText = formatLatencyLabel(result?.latencyMs)
     tunnelTest.status = 'success'
     tunnelTest.message = t('app.modals.tunnel.testPassedWithLatency', { latency: latencyText })
+    tunnelTest.debuggable = false
     logEvent('info', `Connection test passed for tunnel ${payload.name}; latency=${latencyText}`)
   } catch (err) {
     tunnelTest.status = 'error'
     tunnelTest.message = errorMessage(err)
+    tunnelTest.debuggable = true
     logEvent('error', `Connection test failed for tunnel ${payload.name}: ${tunnelTest.message}`)
   }
+}
+
+async function runJumperAIDebug() {
+  if (!jumperTest.debuggable || !jumperTest.message) return
+  const payload = buildJumperPayload(jumperForm)
+  setAIDebugLoading(jumperAiDebug)
+  try {
+    const result = await DebugJumperFailureAPI(payload, jumperTest.message, locale.value)
+    setAIDebugResult(jumperAiDebug, result)
+    logEvent('info', `AI Debug completed for jumper ${payload.name}`)
+  } catch (err) {
+    const message = aiDebugErrorMessage(err, 'AI Debug failed for this jumper.')
+    setAIDebugError(jumperAiDebug, message)
+    logEvent('error', message)
+  }
+}
+
+async function runTunnelAIDebug() {
+  if (!tunnelTest.debuggable || !tunnelTest.message) return
+
+  let inlinePayload = null
+  if (tunnelForm.appendNewJumper) {
+    inlinePayload = buildJumperPayload(inlineJumperForm)
+  }
+  const payload = buildTunnelPayloadForTest()
+  setAIDebugLoading(tunnelAiDebug)
+  try {
+    const result = await DebugTunnelFailureAPI(payload, inlinePayload, tunnelTest.message, locale.value)
+    setAIDebugResult(tunnelAiDebug, result)
+    logEvent('info', `AI Debug completed for tunnel ${payload.name}`)
+  } catch (err) {
+    const message = aiDebugErrorMessage(err, 'AI Debug failed for this tunnel.')
+    setAIDebugError(tunnelAiDebug, message)
+    logEvent('error', message)
+  }
+}
+
+async function runSavedTunnelAIDebug(tunnel) {
+  if (!tunnel?.id || !tunnel?.lastError) return
+  const state = ensureTunnelErrorAIDebugState(tunnel.id)
+  setAIDebugLoading(state)
+  try {
+    const result = await DebugSavedTunnelFailureAPI(Number(tunnel.id), String(tunnel.lastError || ''), locale.value)
+    setAIDebugResult(state, result)
+    logEvent('info', `AI Debug completed for tunnel ${tunnel.name}`)
+  } catch (err) {
+    const message = aiDebugErrorMessage(err, `AI Debug failed for tunnel ${tunnel?.name || ''}`.trim())
+    setAIDebugError(state, message)
+    logEvent('error', message)
+  }
+}
+
+function openSavedTunnelAIDebug(tunnel) {
+  if (!tunnel?.id || !tunnel?.lastError) return
+  selectedAIDebugTunnel.value = tunnel
+  const state = ensureTunnelErrorAIDebugState(tunnel.id)
+  if (state.status === 'idle') {
+    void runSavedTunnelAIDebug(tunnel)
+  }
+}
+
+function closeSavedTunnelAIDebug() {
+  selectedAIDebugTunnel.value = null
+}
+
+function retrySavedTunnelAIDebug() {
+  if (!selectedAIDebugTunnel.value) return
+  void runSavedTunnelAIDebug(selectedAIDebugTunnel.value)
+}
+
+function retestSavedTunnelFromAIDebug() {
+  if (!selectedAIDebugTunnel.value) return
+  void toggleTunnel(selectedAIDebugTunnel.value)
 }
 
 function openNewTunnel() {
@@ -1027,16 +1178,19 @@ function openNewTunnel() {
   Object.assign(inlineJumperForm, defaultInlineJumperForm())
   resetInlineJumperValidation()
   resetTunnelTest()
+  resetAIDebugState(tunnelAiDebug)
   tunnelValidationError.value = ''
   tunnelForm.jumperIds = jumpers.value.length ? [jumpers.value[0].id] : []
   tunnelForm.nextJumperId = getNextTunnelJumperCandidate(tunnelForm.jumperIds)
   tunnelForm.appendNewJumper = jumpers.value.length === 0
   showTunnelModal.value = true
+  trackModalOpen('tunnel_create', 'tunnels')
 }
 
 function openImportTunnel() {
   importTunnelError.value = ''
   showImportTunnelModal.value = true
+  trackModalOpen('tunnel_import', 'tunnels')
 }
 
 function closeImportTunnel() {
@@ -1203,8 +1357,10 @@ function editTunnel(tunnel) {
   Object.assign(inlineJumperForm, defaultInlineJumperForm())
   resetInlineJumperValidation()
   resetTunnelTest()
+  resetAIDebugState(tunnelAiDebug)
   tunnelValidationError.value = ''
   showTunnelModal.value = true
+  trackModalOpen('tunnel_edit', 'tunnels', { tunnel_name: tunnel.name })
 }
 
 function addJumperToTunnelChain(jumperId) {
@@ -1259,6 +1415,7 @@ function copyTunnel(tunnel) {
   Object.assign(inlineJumperForm, defaultInlineJumperForm())
   resetInlineJumperValidation()
   resetTunnelTest()
+  resetAIDebugState(tunnelAiDebug)
   tunnelValidationError.value = ''
   showTunnelModal.value = true
 }
@@ -1373,6 +1530,7 @@ async function toggleTunnel(tunnel) {
     }
 
     const action = updated.status === 'running' ? 'started' : 'stopped'
+    trackTunnelAction(action, updated.name)
     if (updated.status === 'running') {
       // 计算启动耗时
       const duration = Date.now() - startTime
@@ -1459,6 +1617,7 @@ async function submitRedeemDialog() {
 }
 
 function deleteTunnel(tunnel) {
+  trackTunnelAction('delete', tunnel.name)
   openActionDialog({
     mode: 'confirm',
     message: t('app.confirmations.deleteTunnel', { name: tunnel.name }),
@@ -1476,6 +1635,7 @@ function deleteTunnel(tunnel) {
 }
 
 function deleteJumper(jumper) {
+  trackJumperAction('delete', jumper.name)
   const inUseBy = tunnels.value.filter((item) => normalizeJumperIdList(item.jumperIds).includes(jumper.id))
   if (inUseBy.length > 0) {
     openActionDialog({
@@ -1503,8 +1663,9 @@ function deleteJumper(jumper) {
 }
 
 onMounted(async () => {
+  const platform = typeof navigator !== 'undefined' ? navigator.platform || 'unknown' : 'unknown'
+  trackAppStart(appMeta.version, platform)
   await loadStateFromBackend()
-  await loadSSHPilotState({ silent: true })
   try {
     await SaveUILocale(locale.value)
   } catch (_) {
@@ -1523,6 +1684,7 @@ onMounted(async () => {
     logEvent('error', errorMessage(err, 'Failed to check or reset launch-at-login (AutoRun).'))
   }
   stateSyncTimer = window.setInterval(syncStateSilently, STATE_SYNC_INTERVAL_MS)
+  void checkForUpdatesSilently()
 })
 
 onBeforeUnmount(() => {
@@ -1563,8 +1725,12 @@ watch(
       :app-version="appMeta.version"
       :is-pro="isPro"
       :pro-expiry-label="proExpiryLabel"
+      :has-new-version="hasNewVersion"
+      :collapsed="sidebarCollapsed"
       @switch-page="switchPage"
       @upgrade="openProUpgrade"
+      @open-release-page="openReleasePage"
+      @toggle-collapse="toggleSidebar"
     />
 
     <section class="content-shell">
@@ -1609,21 +1775,14 @@ watch(
           :tunnels="filteredTunnels"
           :search-query="tunnelSearchQuery"
           :mode-options="modeOptions"
+          :tunnel-ai-debug-states="tunnelErrorAiDebugStates"
           :get-tunnel-jumper-label="getTunnelJumperLabel"
           @update-search-query="tunnelSearchQuery = $event"
           @toggle-tunnel="toggleTunnel"
           @copy-tunnel="copyTunnel"
           @edit-tunnel="editTunnel"
           @delete-tunnel="deleteTunnel"
-        />
-
-        <SshPilotPage
-          v-if="activePage === 'ssh-pilot'"
-          :jumpers="jumpers"
-          :state="sshPilotState"
-          :busy="sshPilotBusy"
-          @refresh="loadSSHPilotState"
-          @update-settings="updateSSHPilotSettings"
+          @ai-debug="openSavedTunnelAIDebug"
         />
 
         <LogsPage
@@ -1709,6 +1868,17 @@ watch(
   </div>
   <div v-if="actionDialog.visible" class="modal-backdrop fade show" />
 
+  <AIDebugModal
+    :show="!!selectedAIDebugTunnel"
+    :title="selectedAIDebugTunnelTitle"
+    :subtitle="selectedAIDebugTunnelSubtitle"
+    :raw-error="selectedAIDebugTunnel?.lastError || ''"
+    :state="selectedAIDebugTunnelState"
+    @close="closeSavedTunnelAIDebug"
+    @retry-debug="retrySavedTunnelAIDebug"
+    @test-again="retestSavedTunnelFromAIDebug"
+  />
+
   <div v-if="redeemDialog.visible" class="overlay">
     <div class="dialog-card compact-dialog redeem-dialog">
       <div class="dialog-head">
@@ -1724,6 +1894,7 @@ watch(
           :placeholder="$t('config.redeemDialog.codePlaceholder')"
           :disabled="redeemDialog.submitting"
         />
+        <div class="field-note mt-1">{{ $t('config.redeemDialog.codeHint') }}</div>
         <p v-if="redeemDialog.error" class="form-error mb-0 mt-2">{{ redeemDialog.error }}</p>
         <div class="dialog-actions mt-4">
           <div class="dialog-right-actions">
@@ -1757,12 +1928,14 @@ watch(
     :jumper-limits="JUMPER_LIMITS"
     :jumper-validation-error="jumperValidationError"
     :jumper-test="jumperTest"
-    @close="showJumperModal = false"
+    :jumper-ai-debug="jumperAiDebug"
+    @close="showJumperModal = false; resetAIDebugState(jumperAiDebug)"
     @submit="saveJumper"
     @toggle-basic="showJumperBasic = !showJumperBasic"
     @toggle-advanced="showJumperAdvanced = !showJumperAdvanced"
     @key-file-change="onJumperKeyFileChange"
     @test-connection="testJumperConnection"
+    @ai-debug="runJumperAIDebug"
   />
 
   <ImportJumperModal
@@ -1798,7 +1971,8 @@ watch(
     :inline-jumper-validation-error="inlineJumperValidationError"
     :tunnel-validation-error="tunnelValidationError"
     :tunnel-test="tunnelTest"
-    @close="showTunnelModal = false"
+    :tunnel-ai-debug="tunnelAiDebug"
+    @close="showTunnelModal = false; resetAIDebugState(tunnelAiDebug)"
     @submit="saveTunnel"
     @set-primary-jumper="setPrimaryJumperForTunnelChain"
     @add-jumper="addJumperToTunnelChain"
@@ -1807,6 +1981,7 @@ watch(
     @remove-jumper="removeJumperFromTunnelChain"
     @inline-key-file-change="onInlineJumperKeyFileChange"
     @test-connection="testTunnelConnection"
+    @ai-debug="runTunnelAIDebug"
   />
 
   <ImportTunnelModal

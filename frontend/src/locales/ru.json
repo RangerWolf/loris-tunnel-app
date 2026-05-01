@@ -5,15 +5,17 @@
             "subtitle": "Менеджер SSH-туннелей",
             "overview": "Обзор",
             "overviewSubtitle": "Основное состояние и недавняя активность",
-            "jumpers": "Прыжковые серверы",
-            "jumpersSubtitle": "Управление конфигурациями SSH jump host",
+            "jumpers": "Бастионы",
+            "jumpersSubtitle": "Управление SSH-бастионами",
             "tunnels": "Туннели",
             "tunnelsSubtitle": "Создание и управление SSH-туннелями",
             "logs": "Журнал",
             "logsSubtitle": "Просмотр последних операций",
             "config": "Настройки",
             "configSubtitle": "Тема, версия, обновления и продукт",
-            "upgrade": "Обновить"
+            "upgrade": "Обновить",
+            "collapse": "Свернуть боковую панель",
+            "expand": "Развернуть боковую панель"
         },
         "header": {
             "newJumper": "+ Новый прыжковый сервер",
@@ -253,6 +255,47 @@
                 "unknown": "Неизвестный сервер"
             }
         },
+        "aiDebug": {
+            "action": "AI диагностика",
+            "analyzing": "Анализ...",
+            "failed": "Сбой AI Debug",
+            "connectionFailed": "Проверка подключения не удалась",
+            "inlineHint": "Запустите диагностику, чтобы проверить SSH клиент, цепочку серверов и журналы ошибок.",
+            "panelTitle": "Диагностика подключения",
+            "panelHint": "Собираем локальные SSH данные и готовим рекомендации.",
+            "resultTitle": "Наиболее вероятная причина",
+            "firstActions": "Сначала попробуйте",
+            "retryDebug": "Запустить снова",
+            "testAgain": "Проверить снова",
+            "viewResult": "Открыть диагностику",
+            "sourceError": "Исходная ошибка",
+            "modalTitle": "AI диагностика для {name}",
+            "savedTunnelFallback": "Текущий туннель",
+            "progress": {
+                "sshClient": "Проверка SSH клиента",
+                "reproduce": "Повторение сбоя",
+                "analyze": "Анализ SSH журналов",
+                "suggest": "Подготовка рекомендаций"
+            },
+            "confidence": {
+                "high": "Высокая",
+                "medium": "Средняя",
+                "low": "Низкая"
+            },
+            "confidenceLabel": "Уверенность: {value}",
+            "reason": "Причина",
+            "steps": "Рекомендуемые шаги",
+            "details": "Технические подробности",
+            "sshClient": "SSH клиент",
+            "matchedRules": "Совпавшие правила",
+            "checks": "Проверки",
+            "rawError": "Исходная ошибка",
+            "debugExcerpt": "Фрагмент SSH-отладки",
+            "fallbackHint": "Показывается локальная диагностика, потому что AI-анализ сейчас недоступен.",
+            "quotaExceeded": "Дневной лимит AI диагностики исчерпан. Free: {freeLimit} в день; Pro: {proLimit} в день.",
+            "providerBusy": "AI сервис сейчас занят. Повторите попытку позже.",
+            "unavailable": "Сервис AI диагностики временно недоступен. Повторите попытку позже."
+        },
         "common": {
             "cancel": "Отмена",
             "close": "Закрыть",
@@ -303,6 +346,7 @@
             "title": "Введите код лицензии",
             "codeLabel": "Код лицензии",
             "codePlaceholder": "Например: VIP-XXXX-XXXX-XXXX-XXXX",
+            "codeHint": "Сейчас функция все еще в закрытом тестировании. Напишите на yang.rangerwolf@gmail.com, чтобы получить код лицензии.",
             "submitting": "Отправка..."
         },
         "configFile": "Файл конфигурации",

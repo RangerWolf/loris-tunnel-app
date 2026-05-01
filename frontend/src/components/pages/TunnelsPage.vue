@@ -18,13 +18,17 @@ const props = defineProps({
     type: Array,
     required: true
   },
+  tunnelAiDebugStates: {
+    type: Object,
+    required: true
+  },
   getTunnelJumperLabel: {
     type: Function,
     required: true
   }
 })
 
-const emit = defineEmits(['toggle-tunnel', 'copy-tunnel', 'edit-tunnel', 'delete-tunnel', 'update-search-query'])
+const emit = defineEmits(['toggle-tunnel', 'copy-tunnel', 'edit-tunnel', 'delete-tunnel', 'update-search-query', 'ai-debug'])
 const { t } = useI18n()
 
 const rootRef = ref(null)
@@ -254,6 +258,17 @@ function getErrorToggleLabelKey(tunnel) {
 
 function getErrorCopyLabelKey(tunnelId) {
   return isErrorCopied(tunnelId) ? 'app.tunnels.actions.copied' : 'app.tunnels.actions.copyError'
+}
+
+function getTunnelAiDebugState(tunnelId) {
+  return props.tunnelAiDebugStates?.[tunnelId] || { status: 'idle', error: '', result: null }
+}
+
+function getAIDebugActionLabel(tunnelId) {
+  const state = getTunnelAiDebugState(tunnelId)
+  if (state.status === 'analyzing') return t('app.aiDebug.analyzing')
+  if (state.status === 'success' || state.status === 'error') return t('app.aiDebug.viewResult')
+  return t('app.aiDebug.action')
 }
 
 // Merge/replace a Popper modifier by name to avoid duplicate modifier entries.
@@ -515,6 +530,20 @@ function onActionSelect(event, action, tunnel) {
                   <div class="tunnel-error-detail-content">
                     <div class="tunnel-error-detail-label">{{ $t('app.tunnels.errorReason') }}</div>
                     <div class="tunnel-error-detail-message">{{ tunnel.lastError }}</div>
+                    <div class="mt-2">
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-outline-primary ai-debug-action-btn"
+                        :disabled="getTunnelAiDebugState(tunnel.id).status === 'analyzing'"
+                        @click="$emit('ai-debug', tunnel)"
+                      >
+                        <i class="bi" :class="getTunnelAiDebugState(tunnel.id).status === 'analyzing' ? 'bi-hourglass-split' : 'bi-magic'" />
+                        <span>{{ getAIDebugActionLabel(tunnel.id) }}</span>
+                      </button>
+                      <div v-if="getTunnelAiDebugState(tunnel.id).result?.reason" class="tunnel-error-ai-summary mt-2">
+                        {{ getTunnelAiDebugState(tunnel.id).result.reason }}
+                      </div>
+                    </div>
                   </div>
                   <button
                     type="button"

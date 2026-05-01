@@ -13,9 +13,6 @@ How to pair OpenClaw’s remote gateway with Loris Tunnel for stable local port 
 ### [Codex SSH Login on Remote Servers](./20260331-codex-ssh-login-with-loris-tunnel)
 A practical guide for the `codex ssh` login callback issue on remote servers, based on issue #2668 and improved with Loris Tunnel tunnel management.
 
-### [Cherry Studio, Codex & SSH MCP (SSH Pilot)](./20260405-cherry-studio-codex-ssh-mcp-pilot)
-Use the Model Context Protocol over SSH for read-only `execute_bash` against jump hosts—whitelist validation, MCP call logs, and screenshots of SSH Pilot plus Cherry Studio.
-
 ## Upcoming Topics
 
 We are working on more content to help you get the most out of your SSH workflows:

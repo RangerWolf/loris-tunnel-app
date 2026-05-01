@@ -13,7 +13,9 @@
             "logsSubtitle": "檢視近期操作日誌",
             "config": "設定",
             "configSubtitle": "主題、版本、更新與產品入口",
-            "upgrade": "升級"
+            "upgrade": "升級",
+            "collapse": "收合側邊欄",
+            "expand": "展開側邊欄"
         },
         "header": {
             "newJumper": "+ 新建跳板機",
@@ -253,6 +255,47 @@
                 "unknown": "未知跳板機"
             }
         },
+        "aiDebug": {
+            "action": "AI 診斷",
+            "analyzing": "分析中...",
+            "failed": "AI 偵錯失敗",
+            "connectionFailed": "連線測試失敗",
+            "inlineHint": "可以執行診斷來檢查 SSH 用戶端、跳板機鏈路與錯誤日誌。",
+            "panelTitle": "正在診斷連線問題",
+            "panelHint": "正在收集本地 SSH 診斷資訊並產生修復建議。",
+            "resultTitle": "最可能原因",
+            "firstActions": "建議先做",
+            "retryDebug": "重新診斷",
+            "testAgain": "重新測試",
+            "viewResult": "查看診斷結果",
+            "sourceError": "原始錯誤",
+            "modalTitle": "{name} 的 AI 診斷",
+            "savedTunnelFallback": "目前隧道",
+            "progress": {
+                "sshClient": "檢查 SSH 用戶端",
+                "reproduce": "重現連線失敗",
+                "analyze": "分析 SSH 日誌",
+                "suggest": "產生修復建議"
+            },
+            "confidence": {
+                "high": "高",
+                "medium": "中",
+                "low": "低"
+            },
+            "confidenceLabel": "信心度：{value}",
+            "reason": "原因",
+            "steps": "建議步驟",
+            "details": "技術詳情",
+            "sshClient": "SSH 用戶端",
+            "matchedRules": "命中規則",
+            "checks": "檢查結果",
+            "rawError": "原始錯誤",
+            "debugExcerpt": "SSH 偵錯摘錄",
+            "fallbackHint": "目前顯示的是本地診斷結果，因為 AI 分析暫時不可用。",
+            "quotaExceeded": "今日 AI 診斷次數已用完。免費版每天 {freeLimit} 次，Pro 每天 {proLimit} 次。",
+            "providerBusy": "AI 服務正忙，請稍後再試。",
+            "unavailable": "AI 診斷服務暫時不可用，請稍後再試。"
+        },
         "common": {
             "cancel": "取消",
             "close": "關閉",
@@ -300,9 +343,10 @@
         "manageLicense": "管理授權",
         "licenseCode": "註冊碼",
         "redeemDialog": {
-            "title": "輸入邀請碼",
+            "title": "輸入註冊碼",
             "codeLabel": "註冊碼",
             "codePlaceholder": "例如：VIP-XXXX-XXXX-XXXX-XXXX",
+            "codeHint": "目前還處於內測階段，可以發郵件到 yang.rangerwolf@gmail.com 獲取註冊碼",
             "submitting": "提交中..."
         },
         "configFile": "設定檔",

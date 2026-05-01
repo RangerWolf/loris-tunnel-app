@@ -4,6 +4,10 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
     title: "Loris Tunnel",
     description: "A desktop GUI application for managing SSH tunnels — with automatic reconnection and a clean interface.",
+    head: [
+        ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-776FG9SDVQ' }],
+        ['script', {}, `window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-776FG9SDVQ');`]
+    ],
     themeConfig: {
         logo: '../imgs/logo.png',
         // https://vitepress.dev/reference/default-theme-config

@@ -37,16 +37,16 @@ func main() {
 	localeTag := uilocale.Resolve(configDir)
 	trayLabels := traytext.ForLocale(localeTag)
 
-	startTray, endTray := systray.RunWithExternalLoop(func() {
-		showMainWindow := func() {
-			if app == nil || app.ctx == nil {
-				return
-			}
-			wailsruntime.Show(app.ctx)
-			wailsruntime.WindowShow(app.ctx)
-			wailsruntime.WindowUnminimise(app.ctx)
+	showMainWindow := func() {
+		if app == nil || app.ctx == nil {
+			return
 		}
+		wailsruntime.Show(app.ctx)
+		wailsruntime.WindowShow(app.ctx)
+		wailsruntime.WindowUnminimise(app.ctx)
+	}
 
+	startTray, endTray := systray.RunWithExternalLoop(func() {
 		iconBytes := trayIconFallback
 		switch runtime.GOOS {
 		case "windows":
@@ -122,6 +122,13 @@ func main() {
 		OnBeforeClose:     app.beforeClose,
 		OnShutdown:        app.shutdown,
 		HideWindowOnClose: runtime.GOOS == "darwin",
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: "loris-tunnel-single-instance",
+			OnSecondInstanceLaunch: func(secondInstanceData options.SecondInstanceData) {
+				_ = secondInstanceData
+				showMainWindow()
+			},
+		},
 		Bind: []interface{}{
 			app,
 		},

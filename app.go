@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,13 +15,12 @@ import (
 	"time"
 
 	"github.com/energye/systray"
+	"loris-tunnel/internal/aidebug"
 	"loris-tunnel/internal/autostart"
 	"loris-tunnel/internal/biz"
 	"loris-tunnel/internal/conf"
 	"loris-tunnel/internal/device"
 	"loris-tunnel/internal/license"
-	"loris-tunnel/internal/mcphttp"
-	"loris-tunnel/internal/mcpinstall"
 	"loris-tunnel/internal/model"
 	"loris-tunnel/internal/sshconfig"
 	"loris-tunnel/internal/traytext"
@@ -33,24 +30,28 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+const usageHeartbeatInterval = 2 * time.Hour
+
 // App struct
 type App struct {
 	ctx       context.Context
 	storage   *conf.Storage
 	jumper    *biz.JumperBiz
 	tunnel    *biz.TunnelBiz
-	sshPilot  *biz.SSHPilotBiz
 	updater   *updater.Service
 	license   *license.Client
+	aiDebug   *aidebug.Service
 	machineID string
 	initErr   error
-	mcpServer *mcphttp.Server
 
 	trayMu   sync.Mutex
 	trayShow *systray.MenuItem
 	trayQuit *systray.MenuItem
 
 	allowClose atomic.Bool
+
+	usageReporterStop chan struct{}
+	usageReporterWG   sync.WaitGroup
 }
 
 // NewApp creates a new App application struct
@@ -65,14 +66,16 @@ func NewApp() *App {
 	}
 	slog.Info("app initialized", "config", storage.Path())
 
+	licenseClient := license.NewDefaultClient()
+	machineID := device.MachineID()
 	return &App{
 		storage:   storage,
 		jumper:    biz.NewJumperBiz(storage),
 		tunnel:    biz.NewTunnelBiz(storage),
-		sshPilot:  biz.NewSSHPilotBiz(storage),
 		updater:   updater.NewDefaultService(),
-		license:   license.NewDefaultClient(),
-		machineID: device.MachineID(),
+		license:   licenseClient,
+		aiDebug:   aidebug.NewService(licenseClient.BaseURL(), machineID),
+		machineID: machineID,
 	}
 }
 
@@ -185,18 +188,17 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	buildType := wailsruntime.Environment(ctx).BuildType
 	a.license = license.NewClientByBuildType(buildType)
+	a.aiDebug = aidebug.NewService(a.license.BaseURL(), a.machineID)
 	slog.Info("license client initialized", "build_type", buildType, "api_base_url", a.license.BaseURL())
 	slog.Info("app startup")
 	if err := a.ensureReady(); err == nil {
-		if err := a.startMCPHTTPServer(); err != nil {
-			slog.Error("start mcp http server failed", "err", err)
-		}
 		a.syncAutoRunWithConfig()
 		go func() {
 			if err := a.tunnel.StartAutoStart(); err != nil {
 				slog.Error("auto start tunnel failed", "err", err)
 			}
 		}()
+		a.startUsageReporter()
 	}
 }
 
@@ -220,13 +222,65 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 func (a *App) shutdown(ctx context.Context) {
 	_ = ctx
 	slog.Info("app shutdown")
-	if a.mcpServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = a.mcpServer.Shutdown(shutdownCtx)
-		cancel()
-	}
+	a.stopUsageReporter()
 	if a.tunnel != nil {
 		a.tunnel.Shutdown()
+	}
+}
+
+func (a *App) startUsageReporter() {
+	if a.license == nil || strings.TrimSpace(a.machineID) == "" {
+		slog.Warn("usage reporter skipped: missing client or machine id")
+		return
+	}
+	if a.usageReporterStop != nil {
+		return
+	}
+	a.usageReporterStop = make(chan struct{})
+	a.usageReporterWG.Add(1)
+	go func() {
+		defer a.usageReporterWG.Done()
+
+		a.reportUsageEvent("startup")
+
+		ticker := time.NewTicker(usageHeartbeatInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				a.reportUsageEvent("heartbeat")
+			case <-a.usageReporterStop:
+				return
+			}
+		}
+	}()
+}
+
+func (a *App) stopUsageReporter() {
+	if a.usageReporterStop == nil {
+		return
+	}
+	close(a.usageReporterStop)
+	a.usageReporterStop = nil
+	a.usageReporterWG.Wait()
+}
+
+func (a *App) reportUsageEvent(eventType string) {
+	if a.license == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := a.license.ReportUsageEvent(ctx, model.UsageEventRequest{
+		MachineID: a.machineID,
+		EventType: eventType,
+		Platform:  runtime.GOOS,
+		ClientTS:  time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		slog.Warn("report usage event failed", "event_type", eventType, "error", err)
 	}
 }
 
@@ -346,6 +400,143 @@ func (a *App) TestTunnelConnection(payload model.TunnelPayload, inlineJumper *mo
 	}, nil
 }
 
+func (a *App) DebugJumperFailure(payload model.JumperPayload, rawError string, uiLocale string) (model.AIDebugResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.AIDebugResult{}, err
+	}
+	if a.aiDebug == nil {
+		return model.AIDebugResult{}, fmt.Errorf("ai debug service is not initialized")
+	}
+
+	jumper := model.Jumper{
+		Name:                   strings.TrimSpace(payload.Name),
+		Host:                   strings.TrimSpace(payload.Host),
+		Port:                   payload.Port,
+		User:                   strings.TrimSpace(payload.User),
+		AuthType:               strings.TrimSpace(payload.AuthType),
+		KeyPath:                strings.TrimSpace(payload.KeyPath),
+		AgentSocketPath:        strings.TrimSpace(payload.AgentSocketPath),
+		BypassHostVerification: payload.BypassHostVerification,
+		KeepAliveIntervalMs:    payload.KeepAliveIntervalMs,
+		TimeoutMs:              payload.TimeoutMs,
+		HostKeyAlgorithms:      strings.TrimSpace(payload.HostKeyAlgorithms),
+		Notes:                  strings.TrimSpace(payload.Notes),
+	}
+
+	return a.aiDebug.Diagnose(context.Background(), aidebug.DiagnosticInput{
+		TargetType:  "jumper_test",
+		RawError:    rawError,
+		UILocale:    uiLocale,
+		JumperChain: []model.Jumper{jumper},
+	})
+}
+
+func (a *App) DebugTunnelFailure(payload model.TunnelPayload, inlineJumper *model.JumperPayload, rawError string, uiLocale string) (model.AIDebugResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.AIDebugResult{}, err
+	}
+	if a.aiDebug == nil {
+		return model.AIDebugResult{}, fmt.Errorf("ai debug service is not initialized")
+	}
+
+	chain := make([]model.Jumper, 0, len(payload.JumperIDs)+1)
+	if len(payload.JumperIDs) > 0 {
+		cfg, err := a.storage.Load()
+		if err != nil {
+			return model.AIDebugResult{}, err
+		}
+		jumpers, err := collectJumpersForApp(cfg.Jumpers, payload.JumperIDs)
+		if err != nil {
+			return model.AIDebugResult{}, err
+		}
+		chain = append(chain, jumpers...)
+	}
+	if inlineJumper != nil {
+		chain = append(chain, model.Jumper{
+			Name:                   strings.TrimSpace(inlineJumper.Name),
+			Host:                   strings.TrimSpace(inlineJumper.Host),
+			Port:                   inlineJumper.Port,
+			User:                   strings.TrimSpace(inlineJumper.User),
+			AuthType:               strings.TrimSpace(inlineJumper.AuthType),
+			KeyPath:                strings.TrimSpace(inlineJumper.KeyPath),
+			AgentSocketPath:        strings.TrimSpace(inlineJumper.AgentSocketPath),
+			BypassHostVerification: inlineJumper.BypassHostVerification,
+			KeepAliveIntervalMs:    inlineJumper.KeepAliveIntervalMs,
+			TimeoutMs:              inlineJumper.TimeoutMs,
+			HostKeyAlgorithms:      strings.TrimSpace(inlineJumper.HostKeyAlgorithms),
+			Notes:                  strings.TrimSpace(inlineJumper.Notes),
+		})
+	}
+
+	tunnel := model.Tunnel{
+		Name:        strings.TrimSpace(payload.Name),
+		Mode:        strings.TrimSpace(payload.Mode),
+		JumperIDs:   append([]int{}, payload.JumperIDs...),
+		LocalHost:   strings.TrimSpace(payload.LocalHost),
+		LocalPort:   payload.LocalPort,
+		RemoteHost:  strings.TrimSpace(payload.RemoteHost),
+		RemotePort:  payload.RemotePort,
+		AutoStart:   payload.AutoStart,
+		Status:      strings.TrimSpace(payload.Status),
+		Description: strings.TrimSpace(payload.Description),
+	}
+
+	return a.aiDebug.Diagnose(context.Background(), aidebug.DiagnosticInput{
+		TargetType:  "tunnel_test",
+		RawError:    rawError,
+		UILocale:    uiLocale,
+		Tunnel:      &tunnel,
+		JumperChain: chain,
+	})
+}
+
+func (a *App) DebugSavedTunnelFailure(id int, rawError string, uiLocale string) (model.AIDebugResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.AIDebugResult{}, err
+	}
+	if a.aiDebug == nil {
+		return model.AIDebugResult{}, fmt.Errorf("ai debug service is not initialized")
+	}
+	if id <= 0 {
+		return model.AIDebugResult{}, fmt.Errorf("invalid tunnel id")
+	}
+
+	cfg, err := a.storage.Load()
+	if err != nil {
+		return model.AIDebugResult{}, err
+	}
+
+	var tunnel model.Tunnel
+	found := false
+	for _, item := range cfg.Tunnels {
+		if item.ID == id {
+			tunnel = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		return model.AIDebugResult{}, biz.ErrTunnelNotFound
+	}
+
+	jumpers, err := collectJumpersForApp(cfg.Jumpers, tunnel.JumperIDs)
+	if err != nil {
+		return model.AIDebugResult{}, err
+	}
+
+	if strings.TrimSpace(rawError) == "" {
+		rawError = tunnel.LastError
+	}
+
+	return a.aiDebug.Diagnose(context.Background(), aidebug.DiagnosticInput{
+		TargetType:  "tunnel_runtime_error",
+		RawError:    rawError,
+		UILocale:    uiLocale,
+		Tunnel:      &tunnel,
+		JumperChain: jumpers,
+	})
+}
+
 func (a *App) DeleteTunnel(id int) error {
 	if err := a.ensureReady(); err != nil {
 		return err
@@ -360,126 +551,23 @@ func (a *App) ToggleTunnel(id int) (model.Tunnel, error) {
 	return a.tunnel.Toggle(id)
 }
 
-func (a *App) GetSSHPilotState() (model.SSHPilotState, error) {
-	if err := a.ensureReady(); err != nil {
-		return model.SSHPilotState{}, err
+func collectJumpersForApp(items []model.Jumper, ids []int) ([]model.Jumper, error) {
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("at least one jumper is required")
 	}
-	if a.sshPilot == nil {
-		return model.SSHPilotState{}, fmt.Errorf("ssh pilot service is not initialized")
+	index := make(map[int]model.Jumper, len(items))
+	for _, item := range items {
+		index[item.ID] = item
 	}
-	return a.sshPilot.GetState()
-}
-
-func (a *App) UpdateSSHPilotSettings(payload model.SSHPilotUpdatePayload) (model.SSHPilotState, error) {
-	if err := a.ensureReady(); err != nil {
-		return model.SSHPilotState{}, err
-	}
-	if a.sshPilot == nil {
-		return model.SSHPilotState{}, fmt.Errorf("ssh pilot service is not initialized")
-	}
-	return a.sshPilot.UpdateSettings(payload)
-}
-
-func (a *App) ExecuteSSHPilotScript(scriptID string) (model.SSHPilotExecResult, error) {
-	return a.ExecuteSSHPilotCommand(scriptID)
-}
-
-func (a *App) ExecuteSSHPilotCommand(command string) (model.SSHPilotExecResult, error) {
-	if err := a.ensureReady(); err != nil {
-		return model.SSHPilotExecResult{}, err
-	}
-	if a.sshPilot == nil {
-		return model.SSHPilotExecResult{}, fmt.Errorf("ssh pilot service is not initialized")
-	}
-	return a.sshPilot.ExecuteCommand(command)
-}
-
-func (a *App) ListMCPInstallTargets() ([]model.MCPInstallTarget, error) {
-	if err := a.ensureReady(); err != nil {
-		return nil, err
-	}
-	return mcpinstall.ListTargets()
-}
-
-func (a *App) InstallMCPToApps(payload model.MCPInstallRequest) (model.MCPInstallResult, error) {
-	if err := a.ensureReady(); err != nil {
-		return model.MCPInstallResult{}, err
-	}
-	if a.mcpServer == nil {
-		return model.MCPInstallResult{}, fmt.Errorf("mcp http server is not ready")
-	}
-	return mcpinstall.Install(payload.TargetIDs, a.mcpServer.BaseURL())
-}
-
-// Backward compatibility wrappers for older frontend bindings.
-func (a *App) ListSkillInstallTargets() ([]model.MCPInstallTarget, error) {
-	return a.ListMCPInstallTargets()
-}
-
-func (a *App) InstallSkillsToApps(payload model.MCPInstallRequest) (model.MCPInstallResult, error) {
-	return a.InstallMCPToApps(payload)
-}
-
-func (a *App) GetMCPInstallTemplate() (string, error) {
-	if err := a.ensureReady(); err != nil {
-		return "", err
-	}
-	url := ""
-	if a.mcpServer != nil {
-		url = a.mcpServer.BaseURL()
-	}
-	return mcpinstall.BuildInstallJSON(url)
-}
-
-func (a *App) startMCPHTTPServer() error {
-	if a.storage == nil {
-		return fmt.Errorf("storage unavailable")
-	}
-	cfg, err := a.storage.Load()
-	if err != nil {
-		return err
-	}
-
-	port := cfg.SSHPilot.MCPHTTPPort
-	if port <= 0 {
-		port = 39200
-	}
-	token := strings.TrimSpace(cfg.SSHPilot.MCPHTTPToken)
-	if token == "" {
-		token = randomHex(16)
-		_, _ = a.storage.Update(func(c *conf.Config) error {
-			c.SSHPilot.MCPHTTPToken = token
-			if c.SSHPilot.MCPHTTPPort <= 0 {
-				c.SSHPilot.MCPHTTPPort = port
-			}
-			return nil
-		})
-	}
-
-	server, err := mcphttp.Start("127.0.0.1", port, token, func(command string) (bool, string, string, error) {
-		result, callErr := a.ExecuteSSHPilotCommand(command)
-		if callErr != nil {
-			return false, "", "", callErr
+	result := make([]model.Jumper, 0, len(ids))
+	for _, id := range ids {
+		jumper, ok := index[id]
+		if !ok {
+			return nil, biz.ErrJumperNotFound
 		}
-		return result.Success, result.Output, result.Error, nil
-	})
-	if err != nil {
-		return err
+		result = append(result, jumper)
 	}
-	a.mcpServer = server
-	slog.Info("mcp http server started", "url", server.BaseURL())
-	return nil
-}
-
-func randomHex(bytesN int) string {
-	if bytesN <= 0 {
-		bytesN = 16
-	}
-	buf := make([]byte, bytesN)
-	if _, err := rand.Read(buf); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(buf)
+	return result, nil
 }
 
 func (a *App) GetMachineID() (string, error) {

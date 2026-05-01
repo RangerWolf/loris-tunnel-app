@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import { Tooltip } from 'bootstrap'
+import AIDebugResultCard from '../common/AIDebugResultCard.vue'
 
 const props = defineProps({
   show: {
@@ -58,6 +59,10 @@ const props = defineProps({
   tunnelTest: {
     type: Object,
     required: true
+  },
+  tunnelAiDebug: {
+    type: Object,
+    required: true
   }
 })
 
@@ -70,7 +75,8 @@ const emit = defineEmits([
   'move-jumper',
   'trim-jumpers-to-primary',
   'inline-key-file-change',
-  'test-connection'
+  'test-connection',
+  'ai-debug'
 ])
 
 const selectedJumpersHintRef = ref(null)
@@ -573,11 +579,31 @@ function onPrimaryJumperChange(event) {
             <button type="submit" class="btn btn-primary">{{ $t('app.common.save') }}</button>
           </div>
         </div>
-        <div
-          v-if="tunnelTest.message && tunnelTest.status === 'error'"
-          class="dialog-test-result test-result error mt-2"
-        >
-          {{ tunnelTest.message }}
+        <div v-if="tunnelTest.message && tunnelTest.status === 'error'" class="ai-debug-inline-panel mt-3">
+          <div class="ai-debug-inline-head">
+            <div>
+              <div class="ai-debug-inline-title">{{ $t('app.aiDebug.connectionFailed') }}</div>
+              <div class="ai-debug-inline-error">{{ tunnelTest.message }}</div>
+              <div v-if="tunnelTest.debuggable" class="ai-debug-inline-hint">{{ $t('app.aiDebug.inlineHint') }}</div>
+            </div>
+            <button
+              v-if="tunnelTest.debuggable"
+              type="button"
+              class="btn btn-sm btn-outline-primary ai-debug-action-btn"
+              :disabled="tunnelAiDebug.status === 'analyzing'"
+              @click="$emit('ai-debug')"
+            >
+              <i class="bi" :class="tunnelAiDebug.status === 'analyzing' ? 'bi-hourglass-split' : 'bi-magic'" />
+              <span>{{ tunnelAiDebug.status === 'analyzing' ? $t('app.aiDebug.analyzing') : $t('app.aiDebug.action') }}</span>
+            </button>
+          </div>
+          <AIDebugResultCard
+            v-if="tunnelAiDebug.status !== 'idle'"
+            :state="tunnelAiDebug"
+            show-actions
+            @retry-debug="$emit('ai-debug')"
+            @test-again="$emit('test-connection')"
+          />
         </div>
       </form>
     </div>
