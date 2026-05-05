@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: "Loris Tunnel"
-  text: "Efficient SSH Tunnel Management"
-  tagline: "A desktop GUI application for managing SSH tunnels — with automatic reconnection and a clean interface."
+  text: "A Fast, Reliable SSH Tunnel Manager"
+  tagline: "A desktop app that keeps SSH tunnels stable, organized, and easy to manage on macOS and Windows."
   image:
     src: /logo.png
     alt: Loris Tunnel Logo

@@ -6,7 +6,9 @@ export default defineConfig({
     description: "A desktop GUI application for managing SSH tunnels — with automatic reconnection and a clean interface.",
     head: [
         ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-776FG9SDVQ' }],
-        ['script', {}, `window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-776FG9SDVQ');`]
+        ['script', {}, `window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-776FG9SDVQ');`],
+        ['link', { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' }],
+        ['link', { rel: 'shortcut icon', type: 'image/x-icon', href: '/favicon.ico' }]
     ],
     themeConfig: {
         logo: '../imgs/logo.png',
@@ -28,10 +30,8 @@ export default defineConfig({
                 text: 'Articles',
                 items: [
                     { text: 'All Articles', link: '/articles/' },
-                    { text: 'Cherry Studio, Codex & SSH MCP (SSH Pilot)', link: '/articles/20260405-cherry-studio-codex-ssh-mcp-pilot' },
                     { text: 'Codex SSH Login on Remote Servers', link: '/articles/20260331-codex-ssh-login-with-loris-tunnel' },
                     { text: 'OpenClaw + SSH Tunnels', link: '/articles/20260329-openclaw-remote-gateway-ssh-tunnel' },
-                    { text: 'Sample Template', link: '/articles/20260316-sample' },
                 ]
             }
         ],

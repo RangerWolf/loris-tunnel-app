@@ -4,7 +4,9 @@
 
 [English](README.md)
 
-**一款桌面 GUI 应用，用于管理 SSH 隧道——支持自动重连，界面简洁易用。**
+**快速稳定的 SSH 隧道管理工具**
+
+**在 macOS 和 Windows 上轻松管理 SSH 隧道，自动重连、集中整理，日常使用更省心。**
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
@@ -16,9 +18,9 @@
 
 ## 项目简介
 
-**Loris Tunnel** 是一款跨平台桌面应用，让你通过图形界面创建、管理和监控 SSH 隧道。它将 SSH 端口转发的能力封装成直观的 UI，并支持自动重连，即使网络不稳定也能保持隧道畅通。
+**Loris Tunnel** 是一款跨平台桌面应用，用图形界面帮你创建、管理和监控 SSH 隧道。它把常用的 SSH 端口转发能力整理成易用的桌面界面，并内置自动重连机制，网络波动时也能尽量保持连接稳定。
 
-适合经常需要访问防火墙后面的远程服务器、数据库和内网服务的开发者与运维工程师——不用每次都敲命令行。
+如果你经常需要访问远程服务器、数据库，或防火墙后的内网服务，Loris Tunnel 可以把这些隧道集中管理起来，减少反复敲命令和手动排查连接状态的麻烦。
 
 ![总览](screenshots/screenshot-overview.png)
 
@@ -37,17 +39,17 @@
 - 🧠 **AI Debug 故障分析** — 当跳板机或隧道连接测试失败时，一键触发 AI 分析，快速给出可能根因和可执行修复建议
 - ▶️ **启动时自动开启** — 将隧道标记为自动启动，应用打开后立即连接
 - 🌍 **跨平台** — 支持 macOS 和 Windows
-- 💬 **多语言 UI** — English 与 简体中文
+- 💬 **多语言界面** — 支持英文和简体中文
 
 ---
 
 ## 截图
 
-**从 SSH 命令批量导入隧道：**
+**从 SSH 命令导入隧道：**
 
 ![从 SSH 命令导入](screenshots/screenshot-create-tunnels-from-ssh-command.png)
 
-**实时显示 SSH 连接延迟：**
+**查看 SSH 连接延迟：**
 
 ![SSH 延迟](screenshots/screenshot-show-ssh-latency.png)
 
@@ -57,24 +59,24 @@
 
 ### 下载安装
 
-前往 [Releases](../../releases) 页面下载最新版本：
+前往 [Releases](../../releases) 页面下载最新版本。
 
 - **macOS**：`.dmg` 安装包
 - **Windows**：`.exe` 安装包
 
-### macOS 运行隔离放行方法
+### macOS 安全提示处理
 
-首次运行 macOS 版本时，可能会遇到系统安全拦截。以下是两种解除方法：
+首次运行 macOS 版本时，系统可能会提示无法打开应用。可以通过下面两种方式放行。
 
 **方法一：系统设置放行**
 
-1. 打开应用遇到拦截弹窗后，点击"取消"
-2. 打开系统的"系统设置" -> "隐私与安全性"
-3. 向下滚动，找到安全性板块，点击"仍要打开"
+1. 打开应用并看到安全提示后，点击“取消”
+2. 打开“系统设置” -> “隐私与安全性”
+3. 在安全性区域找到 Loris Tunnel，点击“仍要打开”
 
-**方法二：终端一键解除**
+**方法二：通过终端解除限制**
 
-打开终端（Terminal），输入以下命令并回车（可能需要输入电脑密码）：
+打开终端（Terminal），执行下面的命令。系统可能会要求输入电脑密码。
 
 ```bash
 sudo xattr -rd com.apple.quarantine /Applications/loris-tunnel.app
@@ -106,15 +108,15 @@ wails build
 
 ## 配置文件
 
-Loris Tunnel 使用 TOML 格式存储配置，路径解析规则如下：
+Loris Tunnel 使用 TOML 文件保存配置，配置文件位置按以下规则确定：
 
 - **开发模式（`wails dev`）**：
-  - 若当前工作目录可写：使用 `./config.toml`
-  - 否则：使用 `~/.loris-tunnel/config.toml`
-- **打包后的生产版本（二进制，可执行文件，包括开机自启动）**：
+  - 如果当前工作目录可写，使用 `./config.toml`
+  - 否则使用 `~/.loris-tunnel/config.toml`
+- **打包后的正式版本（二进制可执行文件，包括开机自启动）**：
   - 始终使用 `~/.loris-tunnel/config.toml`
 
-在以上任意模式下，如果目标配置文件不存在或内容为空，Loris Tunnel 会在首次运行时自动创建一个默认配置文件。
+无论哪种模式，如果目标配置文件不存在或内容为空，Loris Tunnel 都会在首次运行时自动创建默认配置。
 
 配置示例：
 
@@ -142,9 +144,9 @@ remote_port = 5432
 
 | 模式 | 说明 |
 |------|------|
-| `local` | 将本地端口转发到远程地址（通过 SSH 服务器） |
-| `remote` | 将 SSH 服务器上的远程端口转发到本地地址 |
-| `socks5` | 以 SSH 服务器为 SOCKS5 代理（动态转发） |
+| `local` | 通过 SSH 服务器把本地端口转发到远程地址 |
+| `remote` | 把 SSH 服务器上的远程端口转发到本地地址 |
+| `socks5` | 将 SSH 服务器作为 SOCKS5 代理使用，也就是动态转发 |
 
 ---
 
@@ -161,7 +163,7 @@ remote_port = 5432
 
 ## 社区交流
 
-欢迎加入 QQ 群参与讨论、获取支持和最新动态：
+欢迎加入 QQ 群交流使用经验、反馈问题，或了解最新动态：
 
 - 💬 **QQ 交流群**: **1009737419**
 - 📧 **联系作者**: [yang.rangerwolf@gmail.com](mailto:yang.rangerwolf@gmail.com)

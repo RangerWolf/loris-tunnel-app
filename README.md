@@ -4,7 +4,9 @@
 
 [简体中文](README.CN.md)
 
-**A desktop GUI application for managing SSH tunnels — with automatic reconnection and a clean interface.**
+**A Fast, Reliable SSH Tunnel Manager**
+
+**A desktop app that keeps SSH tunnels stable, organized, and easy to manage on macOS and Windows.**
 
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
