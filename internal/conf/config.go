@@ -9,6 +9,10 @@ import (
 )
 
 const defaultConfigPath = "config.toml"
+
+// DefaultConfigFileName is the config file basename inside the config directory.
+const DefaultConfigFileName = defaultConfigPath
+
 const currentConfigVersion = 1
 
 // isDirWritable checks if a directory is writable by attempting to create a temp file.
@@ -65,29 +69,10 @@ func GetHomeConfigPath() string {
 	return filepath.Join(homeDir, ".loris-tunnel", defaultConfigPath)
 }
 
-// ResolveConfigPath returns config path based on runtime mode.
-// Priority:
-// 1. Dev mode (wails dev): current directory first (portable), then user config dir
-// 2. Build/production: fixed user config dir (~/.loris-tunnel/config.toml)
+// ResolveConfigPath returns the effective config file path: implicit location
+// from runtime mode, then config.root redirection when valid.
 func ResolveConfigPath() string {
-	// When running under `wails dev`, the devserver environment variable is set.
-	// In this mode we prefer a portable, current-directory-first config path so
-	// that developers can keep config.toml beside the project.
-	if strings.TrimSpace(os.Getenv("devserver")) != "" {
-		return filepath.Join(getDefaultConfigDir(), defaultConfigPath)
-	}
-
-	// For built/production binaries we want a stable location that does not
-	// depend on the process working directory (important for Windows shortcuts,
-	// auto-start entries, etc.). Always use the user's home directory with a
-	// `.loris-tunnel` subdirectory.
-	if homePath := GetHomeConfigPath(); homePath != "" {
-		return homePath
-	}
-
-	// Fallback: reuse the previous logic, which prefers current directory when
-	// possible and otherwise falls back to the user config directory.
-	return filepath.Join(getDefaultConfigDir(), defaultConfigPath)
+	return ResolveEffectiveConfigPath(ResolveImplicitConfigPath())
 }
 
 // DefaultConfig creates an empty config.

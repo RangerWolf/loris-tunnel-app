@@ -87,7 +87,7 @@ const CONFIG_TOAST_DURATION_MS = 3800
 let configToastTimer = null
 
 const appMeta = reactive({
-  version: '0.24.5-alpha'
+  version: '0.25.2-alpha'
 })
 const hasNewVersion = ref(false)
 const proLicense = reactive({
@@ -182,7 +182,10 @@ const actionDialog = reactive({
   message: '',
   confirmButtonClass: 'btn-primary',
   confirmLabel: '',
-  onConfirm: null
+  onConfirm: null,
+  secondaryLabel: '',
+  secondaryButtonClass: 'btn-outline-primary',
+  onSecondary: null
 })
 const redeemDialog = reactive({
   visible: false,
@@ -1549,12 +1552,24 @@ async function toggleTunnel(tunnel) {
   }
 }
 
-function openActionDialog({ mode = 'alert', message, confirmButtonClass = 'btn-primary', confirmLabel = '', onConfirm = null }) {
+function openActionDialog({
+  mode = 'alert',
+  message,
+  confirmButtonClass = 'btn-primary',
+  confirmLabel = '',
+  onConfirm = null,
+  secondaryLabel = '',
+  secondaryButtonClass = 'btn-outline-primary',
+  onSecondary = null
+}) {
   actionDialog.mode = mode
   actionDialog.message = message
   actionDialog.confirmButtonClass = confirmButtonClass
   actionDialog.confirmLabel = confirmLabel
   actionDialog.onConfirm = onConfirm
+  actionDialog.secondaryLabel = secondaryLabel
+  actionDialog.secondaryButtonClass = secondaryButtonClass
+  actionDialog.onSecondary = onSecondary
   actionDialog.visible = true
 }
 
@@ -1562,10 +1577,20 @@ function closeActionDialog() {
   actionDialog.visible = false
   actionDialog.confirmLabel = ''
   actionDialog.onConfirm = null
+  actionDialog.secondaryLabel = ''
+  actionDialog.onSecondary = null
 }
 
 async function confirmActionDialog() {
   const handler = actionDialog.onConfirm
+  closeActionDialog()
+  if (typeof handler === 'function') {
+    await handler()
+  }
+}
+
+async function secondaryActionDialog() {
+  const handler = actionDialog.onSecondary
   closeActionDialog()
   if (typeof handler === 'function') {
     await handler()
@@ -1833,40 +1858,41 @@ watch(
     </section>
   </div>
 
-  <div
-    v-if="actionDialog.visible"
-    class="modal fade show"
-    style="display: block"
-    tabindex="-1"
-    aria-modal="true"
-    role="dialog"
-  >
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3 class="modal-title fs-6">{{ $t('app.common.confirm') }}</h3>
-          <button type="button" class="btn-close" :aria-label="$t('app.common.cancel')" @click="closeActionDialog" />
-        </div>
-        <div class="modal-body">
-          <p class="mb-0">{{ actionDialog.message }}</p>
-        </div>
-        <div class="modal-footer action-dialog-footer">
-          <button
-            v-if="actionDialog.mode === 'confirm'"
-            type="button"
-            class="btn btn-outline-secondary"
-            @click="closeActionDialog"
-          >
-            {{ $t('app.common.cancel') }}
-          </button>
-          <button type="button" class="btn" :class="actionDialog.confirmButtonClass" @click="confirmActionDialog">
-            {{ actionDialog.confirmLabel || (actionDialog.mode === 'confirm' ? $t('app.common.delete') : $t('app.common.confirm')) }}
-          </button>
-        </div>
+  <div v-if="actionDialog.visible" class="overlay">
+    <div class="dialog-card compact-dialog action-confirm-dialog">
+      <div class="dialog-head">
+        <h3 class="dialog-title">{{ $t('app.common.confirm') }}</h3>
+      </div>
+      <div class="dialog-body">
+        <p class="action-dialog-message mb-0">{{ actionDialog.message }}</p>
+      </div>
+      <div class="dialog-footer">
+        <button
+          v-if="actionDialog.mode === 'confirm'"
+          type="button"
+          class="btn btn-outline-secondary"
+          @click="closeActionDialog"
+        >
+          {{ $t('app.common.cancel') }}
+        </button>
+        <button
+          v-if="actionDialog.mode === 'confirm' && actionDialog.onSecondary"
+          type="button"
+          class="btn"
+          :class="actionDialog.secondaryButtonClass"
+          @click="secondaryActionDialog"
+        >
+          {{ actionDialog.secondaryLabel }}
+        </button>
+        <button type="button" class="btn" :class="actionDialog.confirmButtonClass" @click="confirmActionDialog">
+          {{
+            actionDialog.confirmLabel ||
+              (actionDialog.mode === 'confirm' ? $t('app.common.delete') : $t('app.common.confirm'))
+          }}
+        </button>
       </div>
     </div>
   </div>
-  <div v-if="actionDialog.visible" class="modal-backdrop fade show" />
 
   <AIDebugModal
     :show="!!selectedAIDebugTunnel"

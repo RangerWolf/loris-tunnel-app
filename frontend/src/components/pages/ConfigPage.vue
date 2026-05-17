@@ -8,7 +8,13 @@ import {
   SelectImportFile,
   ImportConfig,
   OpenConfigDir,
-  SaveUILocale
+  SaveUILocale,
+  GetConfigLocationInfo,
+  GetConfigDirTargetConflict,
+  SelectConfigDirectory,
+  SetConfigDirectory,
+  ResetConfigDirectoryToDefault,
+  QuitApplication
 } from '../../../wailsjs/go/main/App'
 
 const props = defineProps({
@@ -65,6 +71,7 @@ const emit = defineEmits([
 const { t, locale } = useI18n()
 const autoRunEnabled = ref(false)
 const configBusy = ref('')
+const configLocationInfo = ref(null)
 
 onMounted(async () => {
   try {
@@ -72,7 +79,130 @@ onMounted(async () => {
   } catch (_) {
     autoRunEnabled.value = false
   }
+  await loadConfigLocation()
 })
+
+async function loadConfigLocation() {
+  try {
+    configLocationInfo.value = await GetConfigLocationInfo()
+  } catch (_) {
+    configLocationInfo.value = null
+  }
+}
+
+function hasConfigDirFileConflict(conflict) {
+  return !!(conflict?.hasConfigToml || conflict?.hasUILocale)
+}
+
+async function getConfigDirTargetConflictSafe(dir) {
+  try {
+    return { ok: true, conflict: await GetConfigDirTargetConflict(dir) }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
+/** 目标目录复制迁移：冲突检测 → 覆盖/保留确认 → 执行 → 刷新路径 → 退出（打包版自动重启） */
+function emitConfirmApplyConfigDirWrite({ dir, conflict, busyKey, messageNoConflict, apply }) {
+  const hasConflict = hasConfigDirFileConflict(conflict)
+  const message = hasConflict
+    ? t('config.configDirConflictPrompt', { dir })
+    : messageNoConflict
+
+  const run = async (overwrite) => {
+    configBusy.value = busyKey
+    try {
+      await apply(overwrite)
+      await loadConfigLocation()
+      emit('set-config-message', t('config.configDirRelocateQuitHint'))
+      await QuitApplication()
+    } catch (err) {
+      emit('set-config-message', String(err))
+    } finally {
+      configBusy.value = ''
+    }
+  }
+
+  emit('confirm-action', {
+    mode: 'confirm',
+    message,
+    confirmButtonClass: 'btn-warning',
+    confirmLabel: hasConflict ? t('config.configDirConflictOverwrite') : t('app.common.confirm'),
+    secondaryLabel: hasConflict ? t('config.configDirConflictUseExisting') : '',
+    secondaryButtonClass: 'btn-outline-primary',
+    onSecondary: hasConflict ? () => run(false) : null,
+    onConfirm: async () => run(true)
+  })
+}
+
+/**
+ * 统一的「选目录 / 解析默认目录 → GetConfigDirTargetConflict → 确认框 → apply(overwrite)」管线。
+ * resolveDir 返回空字符串表示取消或已在内部 toast，静默结束。
+ */
+async function runConfigDirTargetFlow({ resolveDir, busyKey, messageNoConflict, apply }) {
+  let dir
+  try {
+    dir = await resolveDir()
+  } catch (e) {
+    emit('set-config-message', String(e))
+    return
+  }
+  dir = typeof dir === 'string' ? dir.trim() : ''
+  if (!dir) return
+
+  const res = await getConfigDirTargetConflictSafe(dir)
+  if (!res.ok) {
+    emit('set-config-message', res.error)
+    return
+  }
+
+  emitConfirmApplyConfigDirWrite({
+    dir,
+    conflict: res.conflict,
+    busyKey,
+    messageNoConflict: messageNoConflict(dir),
+    apply: (overwrite) => apply(overwrite, dir)
+  })
+}
+
+async function onChooseConfigDataDir() {
+  try {
+    await runConfigDirTargetFlow({
+      resolveDir: () => SelectConfigDirectory(),
+      busyKey: 'relocate',
+      messageNoConflict: (dir) => t('config.configDirRelocateConfirm', { dir }),
+      apply: (overwrite, dir) => SetConfigDirectory(dir, overwrite)
+    })
+  } catch (err) {
+    emit('set-config-message', String(err))
+  }
+}
+
+async function onResetConfigDataDir() {
+  await runConfigDirTargetFlow({
+    resolveDir: async () => {
+      let info = configLocationInfo.value
+      try {
+        if (!info?.implicitConfigDir) {
+          info = await GetConfigLocationInfo()
+          configLocationInfo.value = info
+        }
+      } catch (e) {
+        emit('set-config-message', String(e))
+        return ''
+      }
+      const implicitDir = (info.implicitConfigDir ?? '').trim()
+      if (!implicitDir) {
+        emit('set-config-message', t('config.configDirResetImplicitMissing'))
+        return ''
+      }
+      return implicitDir
+    },
+    busyKey: 'resetdir',
+    messageNoConflict: () => t('config.configDirResetConfirm'),
+    apply: (overwrite) => ResetConfigDirectoryToDefault(overwrite)
+  })
+}
 
 async function onAutoRunChange(checked) {
   if (checked && !props.isPro) {
@@ -235,6 +365,42 @@ watch(locale, async (newLocale) => {
                 @click="onOpenConfigDir"
               >
                 {{ t('config.openConfigDirBtn') }}
+              </button>
+            </div>
+          </div>
+
+          <div class="config-row align-items-start">
+            <div class="flex-grow-1 min-w-0 pe-2">
+              <div class="config-name">{{ t('config.configDataDir') }}</div>
+              <div class="config-desc">
+                <span
+                  v-if="configLocationInfo?.effectiveConfigDir"
+                  class="text-break d-block"
+                >{{ t('config.configDirCurrentPathPrefix') }}{{ configLocationInfo.effectiveConfigDir }}</span>
+                <template v-else>{{ t('config.configDirUnavailable') }}</template>
+              </div>
+            </div>
+            <div
+              class="btn-group flex-shrink-0 align-self-start"
+              role="group"
+              :aria-label="t('config.configDataDir')"
+            >
+              <button
+                type="button"
+                class="btn btn-sm btn-secondary"
+                :disabled="configBusy !== ''"
+                @click="onChooseConfigDataDir"
+              >
+                {{ t('config.chooseConfigDirBtn') }}
+              </button>
+              <button
+                v-if="configLocationInfo?.isCustomConfigDir"
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                :disabled="configBusy !== ''"
+                @click="onResetConfigDataDir"
+              >
+                {{ t('config.resetConfigDirBtn') }}
               </button>
             </div>
           </div>

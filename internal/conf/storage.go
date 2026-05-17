@@ -107,11 +107,12 @@ func MigrateFromLocalConfigIfNeeded(targetPath string) error {
 }
 
 func NewDefaultStorage() (*Storage, error) {
-	path := ResolveConfigPath()
-	if err := MigrateFromLocalConfigIfNeeded(path); err != nil {
-		slog.Warn("config migration failed", "target", path, "error", err)
+	implicitPath := ResolveImplicitConfigPath()
+	if err := MigrateFromLocalConfigIfNeeded(implicitPath); err != nil {
+		slog.Warn("config migration failed", "target", implicitPath, "error", err)
 	}
-	return NewStorage(path)
+	effectivePath := ResolveEffectiveConfigPath(implicitPath)
+	return NewStorage(effectivePath)
 }
 
 func (r *Storage) Load() (*Config, error) {
