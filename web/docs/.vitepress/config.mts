@@ -6,7 +6,9 @@ export default defineConfig({
     description: "A desktop GUI application for managing SSH tunnels — with automatic reconnection and a clean interface.",
     head: [
         ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-776FG9SDVQ' }],
-        ['script', {}, `window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-776FG9SDVQ');`]
+        ['script', {}, `window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-776FG9SDVQ');`],
+        ['link', { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' }],
+        ['link', { rel: 'shortcut icon', type: 'image/x-icon', href: '/favicon.ico' }]
     ],
     themeConfig: {
         logo: '../imgs/logo.png',
@@ -14,7 +16,8 @@ export default defineConfig({
         nav: [
             { text: 'Home', link: '/' },
             { text: 'Learn More', link: '/articles/20260316-introduction' },
-            { text: 'Articles', link: '/articles/' }
+            { text: 'Articles', link: '/articles/' },
+            { text: 'Privacy', link: '/privacy' }
         ],
 
         sidebar: [
@@ -28,10 +31,8 @@ export default defineConfig({
                 text: 'Articles',
                 items: [
                     { text: 'All Articles', link: '/articles/' },
-                    { text: 'Cherry Studio, Codex & SSH MCP (SSH Pilot)', link: '/articles/20260405-cherry-studio-codex-ssh-mcp-pilot' },
                     { text: 'Codex SSH Login on Remote Servers', link: '/articles/20260331-codex-ssh-login-with-loris-tunnel' },
                     { text: 'OpenClaw + SSH Tunnels', link: '/articles/20260329-openclaw-remote-gateway-ssh-tunnel' },
-                    { text: 'Sample Template', link: '/articles/20260316-sample' },
                 ]
             }
         ],
@@ -41,7 +42,7 @@ export default defineConfig({
         ],
 
         footer: {
-            message: 'Released under the Apache 2.0 License. Contact: <a href="mailto:yang.rangerwolf@gmail.com">yang.rangerwolf@gmail.com</a>',
+            message: 'Released under the Apache 2.0 License. <a href="/privacy">Privacy Policy</a> · Contact: <a href="mailto:yang.rangerwolf@gmail.com">yang.rangerwolf@gmail.com</a>',
             copyright: 'Copyright © 2024-present'
         }
     }
