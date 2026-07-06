@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +32,21 @@ import (
 )
 
 const usageHeartbeatInterval = 2 * time.Hour
+const (
+	aiReportSupportEmail = "admin@lorisdev.cc"
+	maxMailtoSubjectLen  = 180
+	maxMailtoBodyLen     = 3500
+)
+
+type OpenReportEmailPayload struct {
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
+}
+
+type OpenReportEmailResult struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
 
 // App struct
 type App struct {
@@ -855,4 +871,50 @@ func (a *App) OpenConfigDir() error {
 		return fmt.Errorf("open config dir: %w", err)
 	}
 	return nil
+}
+
+// OpenReportEmail opens the default mail client with a prefilled report draft.
+// Success means the OS accepted the open request; it does not guarantee email delivery.
+func (a *App) OpenReportEmail(payload OpenReportEmailPayload) OpenReportEmailResult {
+	subject := trimForMailto(payload.Subject, maxMailtoSubjectLen)
+	body := trimForMailto(payload.Body, maxMailtoBodyLen)
+	mailtoURL := "mailto:" + aiReportSupportEmail + "?subject=" + encodeMailtoQueryValue(subject) + "&body=" + encodeMailtoQueryValue(body)
+
+	name, args := reportEmailCommand(runtime.GOOS, mailtoURL)
+	if strings.TrimSpace(name) == "" {
+		return OpenReportEmailResult{Success: false, Error: "unsupported platform"}
+	}
+
+	cmd := exec.Command(name, args...)
+	if err := cmd.Run(); err != nil {
+		return OpenReportEmailResult{Success: false, Error: err.Error()}
+	}
+	return OpenReportEmailResult{Success: true}
+}
+
+func encodeMailtoQueryValue(value string) string {
+	encoded := url.QueryEscape(value)
+	// Use %20 for spaces to avoid clients showing "+" literally in draft fields.
+	return strings.ReplaceAll(encoded, "+", "%20")
+}
+
+func reportEmailCommand(goos, mailtoURL string) (string, []string) {
+	switch goos {
+	case "darwin":
+		return "open", []string{mailtoURL}
+	case "windows":
+		return "rundll32", []string{"url.dll,FileProtocolHandler", mailtoURL}
+	case "linux":
+		return "xdg-open", []string{mailtoURL}
+	default:
+		return "", nil
+	}
+}
+
+func trimForMailto(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return strings.TrimSpace(value[:limit])
 }

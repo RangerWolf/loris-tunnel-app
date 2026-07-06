@@ -76,6 +76,7 @@ When you choose **AI Debug** after a connection failure, the App may send diagno
 - UI language preference
 
 AI Debug is **not** run automatically. Passwords and private key contents are **never** included in these requests.
+If you believe AI Debug generated inappropriate content, use the in-app **Report inappropriate content** action in the AI Debug result card. This opens your default mail client with a prefilled draft to [admin@lorisdev.cc](mailto:admin@lorisdev.cc).
 
 ### 3.5 Analytics (Google Analytics)
 
@@ -227,6 +228,7 @@ Email: [yang.rangerwolf@gmail.com](mailto:yang.rangerwolf@gmail.com)
 ### AI Debug（可选，需用户主动触发）
 
 连接失败时若您选择 **AI Debug**，可能发送：设备标识符、错误信息与检测结果、隧道/跳板机元数据（主机、端口、用户名等，**不含密码**）、截断后的 SSH 调试输出、界面语言。**密码与私钥内容绝不会发送。**
+若您认为 AI Debug 生成了不当内容，可在 AI Debug 结果卡片中点击 **举报不当内容**。应用会打开默认邮箱并预填举报草稿，发送至 [admin@lorisdev.cc](mailto:admin@lorisdev.cc)。
 
 ### 分析统计（Google Analytics）
 
