@@ -22,6 +22,10 @@ const props = defineProps({
     type: Object,
     required: true
   },
+  aiDebugEnabled: {
+    type: Boolean,
+    default: false
+  },
   getTunnelJumperLabel: {
     type: Function,
     required: true
@@ -530,7 +534,7 @@ function onActionSelect(event, action, tunnel) {
                   <div class="tunnel-error-detail-content">
                     <div class="tunnel-error-detail-label">{{ $t('app.tunnels.errorReason') }}</div>
                     <div class="tunnel-error-detail-message">{{ tunnel.lastError }}</div>
-                    <div class="mt-2">
+                    <div v-if="aiDebugEnabled" class="mt-2">
                       <button
                         type="button"
                         class="btn btn-sm btn-outline-primary ai-debug-action-btn"

@@ -63,6 +63,10 @@ const props = defineProps({
   tunnelAiDebug: {
     type: Object,
     required: true
+  },
+  aiDebugEnabled: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -76,7 +80,8 @@ const emit = defineEmits([
   'trim-jumpers-to-primary',
   'inline-key-file-change',
   'test-connection',
-  'ai-debug'
+  'ai-debug',
+  'report-ai-content'
 ])
 
 const selectedJumpersHintRef = ref(null)
@@ -567,7 +572,14 @@ function onPrimaryJumperChange(event) {
               {{ tunnelTest.status === 'testing' ? $t('app.modals.tunnel.testing') : $t('app.modals.tunnel.testConnection') }}
             </button>
             <span
-              v-if="tunnelTest.message && tunnelTest.status !== 'error'"
+              v-if="!aiDebugEnabled && tunnelTest.message"
+              class="test-result"
+              :class="{ success: tunnelTest.status === 'success', error: tunnelTest.status === 'error' }"
+            >
+              {{ tunnelTest.message }}
+            </span>
+            <span
+              v-else-if="aiDebugEnabled && tunnelTest.message && tunnelTest.status !== 'error'"
               class="test-result"
               :class="{ success: tunnelTest.status === 'success' }"
             >
@@ -579,7 +591,7 @@ function onPrimaryJumperChange(event) {
             <button type="submit" class="btn btn-primary">{{ $t('app.common.save') }}</button>
           </div>
         </div>
-        <div v-if="tunnelTest.message && tunnelTest.status === 'error'" class="ai-debug-inline-panel mt-3">
+        <div v-if="aiDebugEnabled && tunnelTest.message && tunnelTest.status === 'error'" class="ai-debug-inline-panel mt-3">
           <div class="ai-debug-inline-head">
             <div>
               <div class="ai-debug-inline-title">{{ $t('app.aiDebug.connectionFailed') }}</div>
@@ -603,6 +615,7 @@ function onPrimaryJumperChange(event) {
             show-actions
             @retry-debug="$emit('ai-debug')"
             @test-again="$emit('test-connection')"
+            @report-content="$emit('report-ai-content')"
           />
         </div>
       </form>

@@ -16,6 +16,7 @@ import {
   GetStoredLicenseCode,
   GetState,
   LoadSSHConfigJumpersByPath,
+  OpenReportEmail,
   RedeemLicenseCode as RedeemLicenseCodeAPI,
   SaveUILocale,
   SetAutoRunEnabled,
@@ -40,6 +41,7 @@ import ImportJumperModal from './components/modals/ImportJumperModal.vue'
 import TunnelModal from './components/modals/TunnelModal.vue'
 import ImportTunnelModal from './components/modals/ImportTunnelModal.vue'
 import './styles/app-shell.css'
+import { AI_DEBUG_ENABLED } from './config/features'
 
 const { t, locale } = useI18n()
 
@@ -87,7 +89,7 @@ const CONFIG_TOAST_DURATION_MS = 3800
 let configToastTimer = null
 
 const appMeta = reactive({
-  version: '0.25.2-alpha'
+  version: '1.0.3.0'
 })
 const hasNewVersion = ref(false)
 const proLicense = reactive({
@@ -97,6 +99,9 @@ const proLicense = reactive({
   code: ''
 })
 const LIFETIME_DURATION_DAYS = 36500
+const AI_REPORT_SUPPORT_EMAIL = 'admin@lorisdev.cc'
+const AI_REPORT_SUBJECT = '[Loris Tunnel] Report Inappropriate AI Debug Content'
+const AI_REPORT_MAX_FIELD_LEN = 800
 
 watchEffect(() => {
   if (typeof document !== 'undefined') {
@@ -378,6 +383,49 @@ function openExternalUrl(url) {
   }
 }
 
+function toText(value) {
+  return String(value ?? '').trim()
+}
+
+function clipText(value, limit = AI_REPORT_MAX_FIELD_LEN) {
+  const text = toText(value)
+  if (limit <= 0 || text.length <= limit) return text
+  return `${text.slice(0, limit)}...`
+}
+
+async function writeTextToClipboard(text) {
+  const value = String(text ?? '')
+  if (!value) return false
+
+  if (navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value)
+      return true
+    } catch (_) {
+      // fallback below
+    }
+  }
+
+  if (typeof document === 'undefined') return false
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  textarea.setSelectionRange(0, textarea.value.length)
+  let copied = false
+  try {
+    copied = document.execCommand('copy')
+  } catch (_) {
+    copied = false
+  } finally {
+    document.body.removeChild(textarea)
+  }
+  return copied
+}
+
 function nameUnits(text) {
   let units = 0
   for (const char of text || '') {
@@ -504,6 +552,67 @@ function aiDebugErrorMessage(err, fallback = 'AI Debug failed.') {
     return t('app.aiDebug.unavailable')
   }
   return message
+}
+
+function buildAIDebugReportBody({ targetType, result }) {
+  const lines = [
+    'Please describe why this AI output is inappropriate:',
+    '',
+    '[Your report]',
+    '',
+    '--- Context (auto-filled) ---',
+    'Feature: AI Debug',
+    `Target Type: ${clipText(targetType || 'unknown', 40)}`,
+    `App Version: ${clipText(appMeta.version, 64)}`,
+    `OS: ${clipText(typeof navigator !== 'undefined' ? navigator.platform || 'unknown' : 'unknown', 80)}`,
+    `UI Locale: ${clipText(locale.value || 'en', 24)}`,
+    `Timestamp (UTC): ${new Date().toISOString()}`,
+    '',
+    '[AI Output]',
+    `Reason: ${clipText(result?.reason)}`,
+    `Summary: ${clipText(result?.summary)}`,
+    `Steps: ${clipText(Array.isArray(result?.steps) ? result.steps.join(' | ') : '')}`
+  ]
+  return lines.join('\n').trim()
+}
+
+async function showAIDebugReportFallbackDialog(reportBody) {
+  openActionDialog({
+    mode: 'alert',
+    message: t('app.aiDebug.reportOpenFailed'),
+    confirmButtonClass: 'btn-primary',
+    confirmLabel: t('app.aiDebug.copyReportBody'),
+    onConfirm: async () => {
+      const copied = await writeTextToClipboard(reportBody)
+      setConfigMessage(copied ? t('app.aiDebug.copyBodyDone') : t('app.aiDebug.copyFailed'))
+    },
+    secondaryLabel: t('app.aiDebug.copySupportEmail'),
+    secondaryButtonClass: 'btn-outline-secondary',
+    onSecondary: async () => {
+      const copied = await writeTextToClipboard(AI_REPORT_SUPPORT_EMAIL)
+      setConfigMessage(copied ? t('app.aiDebug.copyEmailDone') : t('app.aiDebug.copyFailed'))
+    }
+  })
+}
+
+async function reportAIDebugContent(targetType, state) {
+  const result = state?.result
+  if (!result) return
+
+  const body = buildAIDebugReportBody({ targetType, result })
+  try {
+    const openResult = await OpenReportEmail({
+      subject: AI_REPORT_SUBJECT,
+      body
+    })
+    if (!openResult?.success) {
+      await showAIDebugReportFallbackDialog(body)
+      return
+    }
+    setConfigMessage(t('app.aiDebug.reportDraftOpened'))
+  } catch (_) {
+    await showAIDebugReportFallbackDialog(body)
+  }
 }
 
 async function loadStateFromBackend(options = {}) {
@@ -1037,7 +1146,7 @@ async function testJumperConnection() {
   } catch (err) {
     jumperTest.status = 'error'
     jumperTest.message = errorMessage(err)
-    jumperTest.debuggable = true
+    jumperTest.debuggable = AI_DEBUG_ENABLED
     logEvent('error', `Connection test failed for jumper ${payload.name}: ${jumperTest.message}`)
   }
 }
@@ -1097,13 +1206,13 @@ async function testTunnelConnection() {
   } catch (err) {
     tunnelTest.status = 'error'
     tunnelTest.message = errorMessage(err)
-    tunnelTest.debuggable = true
+    tunnelTest.debuggable = AI_DEBUG_ENABLED
     logEvent('error', `Connection test failed for tunnel ${payload.name}: ${tunnelTest.message}`)
   }
 }
 
 async function runJumperAIDebug() {
-  if (!jumperTest.debuggable || !jumperTest.message) return
+  if (!AI_DEBUG_ENABLED || !jumperTest.debuggable || !jumperTest.message) return
   const payload = buildJumperPayload(jumperForm)
   setAIDebugLoading(jumperAiDebug)
   try {
@@ -1118,7 +1227,7 @@ async function runJumperAIDebug() {
 }
 
 async function runTunnelAIDebug() {
-  if (!tunnelTest.debuggable || !tunnelTest.message) return
+  if (!AI_DEBUG_ENABLED || !tunnelTest.debuggable || !tunnelTest.message) return
 
   let inlinePayload = null
   if (tunnelForm.appendNewJumper) {
@@ -1138,7 +1247,7 @@ async function runTunnelAIDebug() {
 }
 
 async function runSavedTunnelAIDebug(tunnel) {
-  if (!tunnel?.id || !tunnel?.lastError) return
+  if (!AI_DEBUG_ENABLED || !tunnel?.id || !tunnel?.lastError) return
   const state = ensureTunnelErrorAIDebugState(tunnel.id)
   setAIDebugLoading(state)
   try {
@@ -1153,7 +1262,7 @@ async function runSavedTunnelAIDebug(tunnel) {
 }
 
 function openSavedTunnelAIDebug(tunnel) {
-  if (!tunnel?.id || !tunnel?.lastError) return
+  if (!AI_DEBUG_ENABLED || !tunnel?.id || !tunnel?.lastError) return
   selectedAIDebugTunnel.value = tunnel
   const state = ensureTunnelErrorAIDebugState(tunnel.id)
   if (state.status === 'idle') {
@@ -1379,7 +1488,9 @@ function setPrimaryJumperForTunnelChain(jumperId) {
   const id = Number(jumperId)
   if (!Number.isInteger(id) || id <= 0) return
   const ids = normalizeJumperIdList(tunnelForm.jumperIds).filter((item) => item !== id)
-  tunnelForm.jumperIds = [id, ...ids]
+  // When the tunnel currently only has one jumper, changing the primary hop
+  // should replace that hop instead of preserving it as an unintended second hop.
+  tunnelForm.jumperIds = ids.length > 0 ? [id, ...ids] : [id]
   tunnelForm.nextJumperId = getNextTunnelJumperCandidate(tunnelForm.jumperIds)
 }
 
@@ -1801,6 +1912,7 @@ watch(
           :search-query="tunnelSearchQuery"
           :mode-options="modeOptions"
           :tunnel-ai-debug-states="tunnelErrorAiDebugStates"
+          :ai-debug-enabled="AI_DEBUG_ENABLED"
           :get-tunnel-jumper-label="getTunnelJumperLabel"
           @update-search-query="tunnelSearchQuery = $event"
           @toggle-tunnel="toggleTunnel"
@@ -1876,7 +1988,7 @@ watch(
           {{ $t('app.common.cancel') }}
         </button>
         <button
-          v-if="actionDialog.mode === 'confirm' && actionDialog.onSecondary"
+          v-if="actionDialog.onSecondary"
           type="button"
           class="btn"
           :class="actionDialog.secondaryButtonClass"
@@ -1895,6 +2007,7 @@ watch(
   </div>
 
   <AIDebugModal
+    v-if="AI_DEBUG_ENABLED"
     :show="!!selectedAIDebugTunnel"
     :title="selectedAIDebugTunnelTitle"
     :subtitle="selectedAIDebugTunnelSubtitle"
@@ -1903,6 +2016,7 @@ watch(
     @close="closeSavedTunnelAIDebug"
     @retry-debug="retrySavedTunnelAIDebug"
     @test-again="retestSavedTunnelFromAIDebug"
+    @report-content="reportAIDebugContent('saved_tunnel', selectedAIDebugTunnelState)"
   />
 
   <div v-if="redeemDialog.visible" class="overlay">
@@ -1955,6 +2069,7 @@ watch(
     :jumper-validation-error="jumperValidationError"
     :jumper-test="jumperTest"
     :jumper-ai-debug="jumperAiDebug"
+    :ai-debug-enabled="AI_DEBUG_ENABLED"
     @close="showJumperModal = false; resetAIDebugState(jumperAiDebug)"
     @submit="saveJumper"
     @toggle-basic="showJumperBasic = !showJumperBasic"
@@ -1962,6 +2077,7 @@ watch(
     @key-file-change="onJumperKeyFileChange"
     @test-connection="testJumperConnection"
     @ai-debug="runJumperAIDebug"
+    @report-ai-content="reportAIDebugContent('jumper', jumperAiDebug)"
   />
 
   <ImportJumperModal
@@ -1998,6 +2114,7 @@ watch(
     :tunnel-validation-error="tunnelValidationError"
     :tunnel-test="tunnelTest"
     :tunnel-ai-debug="tunnelAiDebug"
+    :ai-debug-enabled="AI_DEBUG_ENABLED"
     @close="showTunnelModal = false; resetAIDebugState(tunnelAiDebug)"
     @submit="saveTunnel"
     @set-primary-jumper="setPrimaryJumperForTunnelChain"
@@ -2008,6 +2125,7 @@ watch(
     @inline-key-file-change="onInlineJumperKeyFileChange"
     @test-connection="testTunnelConnection"
     @ai-debug="runTunnelAIDebug"
+    @report-ai-content="reportAIDebugContent('tunnel', tunnelAiDebug)"
   />
 
   <ImportTunnelModal

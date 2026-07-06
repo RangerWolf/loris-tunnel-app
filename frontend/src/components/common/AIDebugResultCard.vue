@@ -14,7 +14,7 @@ const props = defineProps({
 })
 
 const { t } = useI18n()
-const emit = defineEmits(['retry-debug', 'test-again'])
+const emit = defineEmits(['retry-debug', 'test-again', 'report-content'])
 
 const hasResult = computed(() => !!props.state?.result)
 const steps = computed(() => Array.isArray(props.state?.result?.steps) ? props.state.result.steps : [])
@@ -88,15 +88,24 @@ const confidenceBadgeLabel = computed(() => {
 
     <div v-if="state.result.usedFallback" class="small text-muted mt-2">{{ $t('app.aiDebug.fallbackHint') }}</div>
 
-    <div v-if="showActions" class="ai-debug-actions mt-3">
-      <button type="button" class="btn btn-sm btn-primary" @click="emit('test-again')">
-        <i class="bi bi-arrow-clockwise" />
-        <span>{{ $t('app.aiDebug.testAgain') }}</span>
-      </button>
-      <button type="button" class="btn btn-sm btn-outline-secondary" @click="emit('retry-debug')">
-        <i class="bi bi-arrow-repeat" />
-        <span>{{ $t('app.aiDebug.retryDebug') }}</span>
-      </button>
+    <div v-if="showActions" class="ai-debug-actions-wrap mt-3">
+      <div class="ai-debug-actions">
+        <div class="ai-debug-actions-main">
+          <button type="button" class="btn btn-sm btn-primary" @click="emit('test-again')">
+            <i class="bi bi-arrow-clockwise" />
+            <span>{{ $t('app.aiDebug.testAgain') }}</span>
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" @click="emit('retry-debug')">
+            <i class="bi bi-arrow-repeat" />
+            <span>{{ $t('app.aiDebug.retryDebug') }}</span>
+          </button>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-danger ai-debug-report-btn" @click="emit('report-content')">
+          <i class="bi bi-flag" />
+          <span>{{ $t('app.aiDebug.reportAction') }}</span>
+        </button>
+      </div>
+      <div class="ai-debug-report-hint text-muted">{{ $t('app.aiDebug.reportHint') }}</div>
     </div>
 
     <details class="ai-debug-details mt-3">
@@ -244,7 +253,21 @@ const confidenceBadgeLabel = computed(() => {
   background: var(--bs-primary);
 }
 
+.ai-debug-actions-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
 .ai-debug-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ai-debug-actions-main {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -254,6 +277,16 @@ const confidenceBadgeLabel = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.ai-debug-report-btn {
+  margin-left: auto;
+}
+
+.ai-debug-report-hint {
+  font-size: 0.68rem;
+  line-height: 1.3;
+  text-align: right;
 }
 
 .ai-debug-details summary {

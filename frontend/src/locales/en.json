@@ -294,7 +294,16 @@
             "fallbackHint": "Showing local diagnostics because AI analysis was unavailable.",
             "quotaExceeded": "Today's AI diagnosis quota has been used. Free gets {freeLimit}/day; Pro gets {proLimit}/day.",
             "providerBusy": "The AI service is busy. Please try again later.",
-            "unavailable": "AI diagnosis service is temporarily unavailable. Please try again later."
+            "unavailable": "AI diagnosis service is temporarily unavailable. Please try again later.",
+            "reportAction": "Report inappropriate content",
+            "reportHint": "Opens your default email app with a prefilled draft.",
+            "reportDraftOpened": "Email draft opened. Review and send when ready.",
+            "reportOpenFailed": "Cannot open your default email app. Copy the address and report content, then send it from any mail client.",
+            "copySupportEmail": "Copy support email",
+            "copyReportBody": "Copy report content",
+            "copyEmailDone": "Support email copied.",
+            "copyBodyDone": "Report content copied.",
+            "copyFailed": "Copy failed. Please copy manually."
         },
         "common": {
             "cancel": "Cancel",

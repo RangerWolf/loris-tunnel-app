@@ -294,7 +294,16 @@
             "fallbackHint": "当前展示的是本地诊断结果，因为 AI 分析暂时不可用。",
             "quotaExceeded": "今日 AI 诊断次数已用完。免费版每天 {freeLimit} 次，Pro 每天 {proLimit} 次。",
             "providerBusy": "AI 服务正忙，请稍后再试。",
-            "unavailable": "AI 诊断服务暂时不可用，请稍后再试。"
+            "unavailable": "AI 诊断服务暂时不可用，请稍后再试。",
+            "reportAction": "举报不当内容",
+            "reportHint": "将使用默认邮箱打开预填举报草稿。",
+            "reportDraftOpened": "已打开邮件草稿，请确认后发送。",
+            "reportOpenFailed": "无法打开默认邮箱应用。请复制收件地址和举报内容，并通过任意邮箱客户端发送。",
+            "copySupportEmail": "复制收件邮箱",
+            "copyReportBody": "复制举报内容",
+            "copyEmailDone": "已复制收件邮箱。",
+            "copyBodyDone": "已复制举报内容。",
+            "copyFailed": "复制失败，请手动复制。"
         },
         "common": {
             "cancel": "取消",

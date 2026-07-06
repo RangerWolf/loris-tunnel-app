@@ -24,7 +24,7 @@ defineProps({
   }
 })
 
-defineEmits(['close', 'retry-debug', 'test-again'])
+defineEmits(['close', 'retry-debug', 'test-again', 'report-content'])
 </script>
 
 <template>
@@ -47,6 +47,7 @@ defineEmits(['close', 'retry-debug', 'test-again'])
           show-actions
           @retry-debug="$emit('retry-debug')"
           @test-again="$emit('test-again')"
+          @report-content="$emit('report-content')"
         />
       </div>
       <div class="dialog-actions ai-debug-dialog-actions">

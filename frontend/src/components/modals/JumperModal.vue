@@ -55,10 +55,14 @@ defineProps({
   jumperAiDebug: {
     type: Object,
     required: true
+  },
+  aiDebugEnabled: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['close', 'submit', 'toggle-basic', 'toggle-advanced', 'key-file-change', 'test-connection', 'ai-debug'])
+defineEmits(['close', 'submit', 'toggle-basic', 'toggle-advanced', 'key-file-change', 'test-connection', 'ai-debug', 'report-ai-content'])
 
 const keepAliveHintRef = ref(null)
 const bypassHintRef = ref(null)
@@ -367,7 +371,14 @@ onBeforeUnmount(() => {
               {{ jumperTest.status === 'testing' ? $t('app.modals.jumper.testing') : $t('app.modals.jumper.testConnection') }}
             </button>
             <span
-              v-if="jumperTest.message && jumperTest.status !== 'error'"
+              v-if="!aiDebugEnabled && jumperTest.message"
+              class="test-result"
+              :class="{ success: jumperTest.status === 'success', error: jumperTest.status === 'error' }"
+            >
+              {{ jumperTest.message }}
+            </span>
+            <span
+              v-else-if="aiDebugEnabled && jumperTest.message && jumperTest.status !== 'error'"
               class="test-result"
               :class="{ success: jumperTest.status === 'success' }"
             >
@@ -379,7 +390,7 @@ onBeforeUnmount(() => {
             <button type="submit" class="btn btn-primary">{{ $t('app.common.save') }}</button>
           </div>
         </div>
-        <div v-if="jumperTest.message && jumperTest.status === 'error'" class="ai-debug-inline-panel mt-3">
+        <div v-if="aiDebugEnabled && jumperTest.message && jumperTest.status === 'error'" class="ai-debug-inline-panel mt-3">
           <div class="ai-debug-inline-head">
             <div>
               <div class="ai-debug-inline-title">{{ $t('app.aiDebug.connectionFailed') }}</div>
@@ -403,6 +414,7 @@ onBeforeUnmount(() => {
             show-actions
             @retry-debug="$emit('ai-debug')"
             @test-again="$emit('test-connection')"
+            @report-content="$emit('report-ai-content')"
           />
         </div>
       </form>
