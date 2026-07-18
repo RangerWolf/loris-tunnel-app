@@ -18,10 +18,17 @@ type Jumper struct {
 	Notes                  string `json:"notes" toml:"notes"`
 }
 
+// TunnelGroup is a user-defined collection for organizing tunnels.
+type TunnelGroup struct {
+	ID   int    `json:"id" toml:"id"`
+	Name string `json:"name" toml:"name"`
+}
+
 // Tunnel is the SSH tunnel configuration used by the frontend.
 type Tunnel struct {
 	ID          int    `json:"id" toml:"id"`
 	Name        string `json:"name" toml:"name"`
+	GroupID     int    `json:"groupId" toml:"group_id"`
 	Mode        string `json:"mode" toml:"mode"`
 	JumperIDs   []int  `json:"jumperIds" toml:"jumper_ids"`
 	LocalHost   string `json:"localHost" toml:"local_host"`
@@ -37,8 +44,14 @@ type Tunnel struct {
 
 // State is the full frontend state stored in config.
 type State struct {
-	Jumpers []Jumper `json:"jumpers"`
-	Tunnels []Tunnel `json:"tunnels"`
+	Jumpers []Jumper      `json:"jumpers"`
+	Groups  []TunnelGroup `json:"groups"`
+	Tunnels []Tunnel      `json:"tunnels"`
+}
+
+// TunnelGroupPayload is used by create/update group APIs.
+type TunnelGroupPayload struct {
+	Name string `json:"name"`
 }
 
 // JumperPayload is used by create/update APIs.
@@ -61,6 +74,7 @@ type JumperPayload struct {
 // TunnelPayload is used by create/update APIs.
 type TunnelPayload struct {
 	Name        string `json:"name"`
+	GroupID     int    `json:"groupId"`
 	Mode        string `json:"mode"`
 	JumperIDs   []int  `json:"jumperIds"`
 	LocalHost   string `json:"localHost"`

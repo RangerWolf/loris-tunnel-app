@@ -10,6 +10,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"loris-tunnel/internal/traytext"
 	"loris-tunnel/internal/uilocale"
@@ -17,6 +18,10 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+// distributionChannel is overridden for Store builds with
+// -ldflags "-X main.distributionChannel=store".
+var distributionChannel = "github"
 
 //go:embed build/windows/icon.ico
 var trayIconWindows []byte
@@ -122,6 +127,14 @@ func main() {
 		OnBeforeClose:     app.beforeClose,
 		OnShutdown:        app.shutdown,
 		HideWindowOnClose: runtime.GOOS == "darwin",
+		// Keep WebView2 state outside the installation directory. This is essential
+		// for packaged Windows builds, whose install location is not writable.
+		// GPU acceleration is disabled because this application is a form/list UI;
+		// it avoids WebView2 renderer blank-screen failures on some Windows builds.
+		Windows: &windows.Options{
+			WebviewUserDataPath:  webviewUserDataPath(),
+			WebviewGpuIsDisabled: true,
+		},
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "loris-tunnel-single-instance",
 			OnSecondInstanceLaunch: func(secondInstanceData options.SecondInstanceData) {
@@ -139,4 +152,21 @@ func main() {
 	}
 	// Ensure tray resources are released when the window exits directly.
 	systray.Quit()
+}
+
+func webviewUserDataPath() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+
+	cacheDir, err := os.UserCacheDir()
+	if err != nil || cacheDir == "" {
+		return ""
+	}
+
+	path := filepath.Join(cacheDir, "LorisTunnel", "WebView2")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return ""
+	}
+	return path
 }

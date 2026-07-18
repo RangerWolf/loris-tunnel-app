@@ -98,10 +98,28 @@
                 "stopped": "Stopped",
                 "busy": "Busy",
                 "error": "Error"
+            },
+            "groups": {
+                "manage": "Manage Groups",
+                "manageTitle": "Manage Tunnel Groups",
+                "create": "Create Group",
+                "newGroupPlaceholder": "New group name",
+                "empty": "No groups yet. Create one to organize tunnels.",
+                "ungrouped": "Ungrouped",
+                "rename": "Rename",
+                "delete": "Delete Group",
+                "moveTo": "Move to group",
+                "moveToNamed": "Move to {name}",
+                "moved": "\"{name}\" moved to {group}",
+                "nameRequired": "Group name is required.",
+                "nameTooLong": "Group name must be <= {max} chars or <= {half} Chinese chars.",
+                "nameDuplicate": "A group with this name already exists.",
+                "hideEmptyUngrouped": "Hide Ungrouped when empty"
             }
         },
         "confirmations": {
             "deleteTunnel": "Delete tunnel \"{name}\"?",
+            "deleteTunnelGroup": "Delete group \"{name}\"? Tunnels in this group will move to Ungrouped.",
             "deleteJumper": "Delete jumper \"{name}\"?",
             "deleteJumperBlocked": "Cannot delete jumper \"{name}\" because it is used by {count} tunnel(s)."
         },
@@ -210,8 +228,10 @@
                 "editTitle": "Edit Tunnel",
                 "name": "Name",
                 "mode": "Mode",
+                "group": "Group",
                 "localHost": "Local Host",
                 "localPort": "Local Port",
+                "localPortInUseWarning": "Local port {port} is already used by another tunnel config: {names} (warning only, save is not blocked)",
                 "remoteHost": "Remote Host",
                 "remotePort": "Remote Port",
                 "jumpers": "Jumpers",
@@ -236,6 +256,9 @@
                 "saveTunnel": "Save Tunnel",
                 "testConnection": "Test Connection",
                 "testing": "Testing...",
+                "testRequiredFields": "Please fill in required fields.",
+                "testRequiredRemote": "Please fill in required remote host/port.",
+                "testSelectJumper": "Please select at least one jumper.",
                 "testPassedWithLatency": "Connection test passed. SSH latency: {latency}."
             }
         },
@@ -340,6 +363,7 @@
         "freeVersion": "Free Version",
         "checkUpdates": "Check for Updates",
         "checkingUpdates": "Checking...",
+        "storeUpdatesManaged": "Updates are managed by Microsoft Store.",
         "updateResultTitle": "Update Check Result",
         "noUpdatesAvailable": "No updates available.",
         "latestVersionIs": "Latest version: {version}",
@@ -355,7 +379,7 @@
             "title": "Enter License Code",
             "codeLabel": "License Code",
             "codePlaceholder": "Example: VIP-XXXX-XXXX-XXXX-XXXX",
-            "codeHint": "Email yang.rangerwolf@gmail.com for a license code during beta.",
+            "codeHint": "Email yang.rangerwolf{'@'}gmail.com for a license code during beta.",
             "submitting": "Submitting..."
         },
         "configFile": "Config File",

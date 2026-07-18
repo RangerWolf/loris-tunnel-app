@@ -13,7 +13,13 @@ import (
 	"loris-tunnel/internal/model"
 )
 
-var ErrTunnelNotFound = errors.New("tunnel not found")
+var (
+	ErrTunnelNotFound         = errors.New("tunnel not found")
+	ErrFreePlanRunningLimit   = errors.New("free plan running tunnel limit exceeded")
+)
+
+// FreePlanRunningLimit is the max concurrent running tunnels for non-Pro users.
+const FreePlanRunningLimit = 3
 
 type TunnelBiz struct {
 	storage *conf.Storage
@@ -50,10 +56,14 @@ func (b *TunnelBiz) Create(payload model.TunnelPayload) (model.Tunnel, error) {
 		if _, err := collectJumpers(cfg.Jumpers, payload.JumperIDs); err != nil {
 			return err
 		}
+		if err := validateGroupID(cfg.Groups, payload.GroupID); err != nil {
+			return err
+		}
 
 		created = model.Tunnel{
 			ID:          nextTunnelID(cfg.Tunnels),
 			Name:        payload.Name,
+			GroupID:     payload.GroupID,
 			Mode:        payload.Mode,
 			JumperIDs:   append([]int{}, payload.JumperIDs...),
 			LocalHost:   payload.LocalHost,
@@ -93,6 +103,9 @@ func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, e
 		if _, err := collectJumpers(cfg.Jumpers, payload.JumperIDs); err != nil {
 			return err
 		}
+		if err := validateGroupID(cfg.Groups, payload.GroupID); err != nil {
+			return err
+		}
 
 		idx := -1
 		for i := range cfg.Tunnels {
@@ -108,6 +121,7 @@ func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, e
 		updated = model.Tunnel{
 			ID:          id,
 			Name:        payload.Name,
+			GroupID:     payload.GroupID,
 			Mode:        payload.Mode,
 			JumperIDs:   append([]int{}, payload.JumperIDs...),
 			LocalHost:   payload.LocalHost,
@@ -120,6 +134,42 @@ func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, e
 			Description: payload.Description,
 		}
 		cfg.Tunnels[idx] = updated
+		return nil
+	})
+	if err != nil {
+		return model.Tunnel{}, err
+	}
+
+	return updated, nil
+}
+
+func (b *TunnelBiz) MoveToGroup(id int, groupID int) (model.Tunnel, error) {
+	if id <= 0 {
+		return model.Tunnel{}, fmt.Errorf("invalid tunnel id")
+	}
+	if groupID < 0 {
+		groupID = 0
+	}
+
+	var updated model.Tunnel
+	_, err := b.storage.Update(func(cfg *conf.Config) error {
+		if err := validateGroupID(cfg.Groups, groupID); err != nil {
+			return err
+		}
+
+		idx := -1
+		for i := range cfg.Tunnels {
+			if cfg.Tunnels[i].ID == id {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 {
+			return ErrTunnelNotFound
+		}
+
+		cfg.Tunnels[idx].GroupID = groupID
+		updated = cfg.Tunnels[idx]
 		return nil
 	})
 	if err != nil {
@@ -155,7 +205,15 @@ func (b *TunnelBiz) Delete(id int) error {
 	return err
 }
 
-func (b *TunnelBiz) Toggle(id int) (model.Tunnel, error) {
+func (b *TunnelBiz) RunningCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.runs)
+}
+
+// Toggle starts or stops a tunnel. maxRunning <= 0 means unlimited (Pro);
+// otherwise starting is blocked when RunningCount() >= maxRunning.
+func (b *TunnelBiz) Toggle(id int, maxRunning int) (model.Tunnel, error) {
 	if id <= 0 {
 		return model.Tunnel{}, fmt.Errorf("invalid tunnel id")
 	}
@@ -176,6 +234,10 @@ func (b *TunnelBiz) Toggle(id int) (model.Tunnel, error) {
 			return model.Tunnel{}, err
 		}
 		return b.updateStatus(id, "stopped", "")
+	}
+
+	if maxRunning > 0 && b.RunningCount() >= maxRunning {
+		return model.Tunnel{}, fmt.Errorf("%w: limit %d", ErrFreePlanRunningLimit, maxRunning)
 	}
 
 	jumpers, err := collectJumpers(cfg.Jumpers, tunnel.JumperIDs)
@@ -304,7 +366,9 @@ func (b *TunnelBiz) attachRuntimeLatencies(items []model.Tunnel) {
 	}
 }
 
-func (b *TunnelBiz) StartAutoStart() error {
+// StartAutoStart starts tunnels marked autoStart. maxRunning <= 0 means unlimited
+// (Pro); otherwise only the first maxRunning auto-start tunnels are started.
+func (b *TunnelBiz) StartAutoStart(maxRunning int) error {
 	cfg, err := b.storage.Load()
 	if err != nil {
 		return err
@@ -315,8 +379,15 @@ func (b *TunnelBiz) StartAutoStart() error {
 		if !t.AutoStart {
 			continue
 		}
-		_, _ = b.updateStatus(t.ID, "busy", "")
 		autoStartTunnels = append(autoStartTunnels, t)
+	}
+
+	if maxRunning > 0 && len(autoStartTunnels) > maxRunning {
+		autoStartTunnels = autoStartTunnels[:maxRunning]
+	}
+
+	for _, t := range autoStartTunnels {
+		_, _ = b.updateStatus(t.ID, "busy", "")
 	}
 
 	var wg sync.WaitGroup
@@ -502,6 +573,9 @@ func normalizeTunnelPayload(payload model.TunnelPayload) model.TunnelPayload {
 	payload.Description = strings.TrimSpace(payload.Description)
 	payload.Status = strings.TrimSpace(payload.Status)
 	payload.JumperIDs = normalizeJumperIDs(payload.JumperIDs)
+	if payload.GroupID < 0 {
+		payload.GroupID = 0
+	}
 
 	if payload.Mode == "" {
 		payload.Mode = "local"

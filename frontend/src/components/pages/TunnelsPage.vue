@@ -2,13 +2,21 @@
 import IconActionButton from '../common/IconActionButton.vue'
 import TooltipText from '../common/TooltipText.vue'
 import { Dropdown } from 'bootstrap'
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
   tunnels: {
     type: Array,
     required: true
+  },
+  groups: {
+    type: Array,
+    default: () => []
+  },
+  hideEmptyUngrouped: {
+    type: Boolean,
+    default: true
   },
   searchQuery: {
     type: String,
@@ -32,15 +40,110 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['toggle-tunnel', 'copy-tunnel', 'edit-tunnel', 'delete-tunnel', 'update-search-query', 'ai-debug'])
+const emit = defineEmits([
+  'toggle-tunnel',
+  'copy-tunnel',
+  'edit-tunnel',
+  'delete-tunnel',
+  'update-search-query',
+  'ai-debug',
+  'manage-groups',
+  'rename-group',
+  'delete-group',
+  'move-tunnel-to-group'
+])
 const { t } = useI18n()
+
+const UNGROUPED_SECTION_KEY = 'ungrouped'
+const COLLAPSED_GROUPS_STORAGE_KEY = 'lt.tunnel-groups.collapsed'
 
 const rootRef = ref(null)
 const localSearchQuery = ref(props.searchQuery)
 const expandedErrorIds = ref(new Set())
 const copiedErrorIds = ref(new Set())
 const copyResetTimers = new Map()
+const collapsedSectionKeys = ref(new Set())
 const ACTION_DROPDOWN_READY_ATTR = 'data-lt-action-dropdown-ready'
+
+const showGroupedView = computed(() => Array.isArray(props.groups) && props.groups.length > 0)
+
+const validGroupIds = computed(() => new Set(props.groups.map((group) => Number(group.id))))
+
+const tunnelSections = computed(() => {
+  if (!showGroupedView.value) return []
+
+  const grouped = new Map()
+  for (const group of props.groups) {
+    grouped.set(Number(group.id), [])
+  }
+
+  const ungrouped = []
+  for (const tunnel of props.tunnels) {
+    const groupId = resolveTunnelGroupId(tunnel)
+    if (groupId > 0) {
+      const bucket = grouped.get(groupId)
+      if (bucket) bucket.push(tunnel)
+      else ungrouped.push(tunnel)
+    } else {
+      ungrouped.push(tunnel)
+    }
+  }
+
+  const searching = Boolean(localSearchQuery.value.trim())
+  const sections = []
+
+  for (const group of props.groups) {
+    const items = grouped.get(Number(group.id)) || []
+    if (searching && items.length === 0) continue
+    sections.push({
+      key: String(group.id),
+      groupId: Number(group.id),
+      name: group.name,
+      tunnels: items,
+      isUngrouped: false
+    })
+  }
+
+  if (ungrouped.length > 0 || (!searching && !props.hideEmptyUngrouped)) {
+    sections.push({
+      key: UNGROUPED_SECTION_KEY,
+      groupId: 0,
+      name: t('app.tunnels.groups.ungrouped'),
+      tunnels: ungrouped,
+      isUngrouped: true
+    })
+  }
+
+  return sections
+})
+
+const visibleEntries = computed(() => {
+  if (props.tunnels.length === 0) {
+    return [{ kind: 'empty', key: 'empty' }]
+  }
+
+  if (!showGroupedView.value) {
+    return props.tunnels.flatMap((tunnel) => [
+      { kind: 'tunnel', key: `tunnel-${tunnel.id}`, tunnel },
+      ...(isErrorExpanded(tunnel.id)
+        ? [{ kind: 'error', key: `error-${tunnel.id}`, tunnel }]
+        : [])
+    ])
+  }
+
+  const entries = []
+  for (const section of tunnelSections.value) {
+    entries.push({ kind: 'group', key: `group-${section.key}`, section })
+    if (isSectionCollapsed(section.key)) continue
+    for (const tunnel of section.tunnels) {
+      entries.push({ kind: 'tunnel', key: `tunnel-${tunnel.id}`, tunnel })
+      if (isErrorExpanded(tunnel.id)) {
+        entries.push({ kind: 'error', key: `error-${tunnel.id}`, tunnel })
+      }
+    }
+  }
+  return entries
+})
 
 watch(() => props.searchQuery, (newValue) => {
   localSearchQuery.value = newValue
@@ -48,6 +151,14 @@ watch(() => props.searchQuery, (newValue) => {
 
 watch(localSearchQuery, (newValue) => {
   emit('update-search-query', newValue)
+  if (!newValue.trim()) return
+  const next = new Set(collapsedSectionKeys.value)
+  tunnelSections.value.forEach((section) => {
+    if (section.tunnels.length > 0) {
+      next.delete(section.key)
+    }
+  })
+  collapsedSectionKeys.value = next
 })
 
 watch(
@@ -76,6 +187,78 @@ onBeforeUnmount(() => {
   })
   copyResetTimers.clear()
 })
+
+onMounted(() => {
+  loadCollapsedSections()
+})
+
+function loadCollapsedSections() {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = window.localStorage.getItem(COLLAPSED_GROUPS_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) {
+      collapsedSectionKeys.value = new Set(parsed.map((item) => String(item)))
+    }
+  } catch (_) {
+    collapsedSectionKeys.value = new Set()
+  }
+}
+
+function persistCollapsedSections() {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify([...collapsedSectionKeys.value]))
+}
+
+function resolveTunnelGroupId(tunnel) {
+  const groupId = Number(tunnel?.groupId) || 0
+  if (groupId > 0 && validGroupIds.value.has(groupId)) return groupId
+  return 0
+}
+
+function isSectionCollapsed(sectionKey) {
+  return collapsedSectionKeys.value.has(sectionKey)
+}
+
+function toggleSectionCollapsed(sectionKey) {
+  const next = new Set(collapsedSectionKeys.value)
+  if (next.has(sectionKey)) {
+    next.delete(sectionKey)
+  } else {
+    next.add(sectionKey)
+  }
+  collapsedSectionKeys.value = next
+  persistCollapsedSections()
+}
+
+function getMoveGroupOptions(tunnel) {
+  const currentGroupId = resolveTunnelGroupId(tunnel)
+  const options = props.groups
+    .filter((group) => Number(group.id) !== currentGroupId)
+    .map((group) => ({
+      groupId: Number(group.id),
+      label: group.name
+    }))
+  if (currentGroupId !== 0) {
+    options.unshift({
+      groupId: 0,
+      label: t('app.tunnels.groups.ungrouped')
+    })
+  }
+  return options
+}
+
+function onGroupActionSelect(event, action, section) {
+  hideActionDropdown(event)
+  if (action === 'rename') {
+    emit('rename-group', { id: section.groupId, name: section.name })
+    return
+  }
+  if (action === 'delete') {
+    emit('delete-group', { id: section.groupId, name: section.name })
+  }
+}
 
 function getModeLabel(modeValue) {
   return props.modeOptions.find((mode) => mode.value === modeValue)?.label || modeValue
@@ -367,7 +550,7 @@ function hideActionDropdown(event) {
 }
 
 // Close dropdown first, then execute the selected action callback.
-function onActionSelect(event, action, tunnel) {
+function onActionSelect(event, action, tunnel, payload = null) {
   hideActionDropdown(event)
   if (action === 'edit') {
     emit('edit-tunnel', tunnel)
@@ -375,6 +558,10 @@ function onActionSelect(event, action, tunnel) {
   }
   if (action === 'copy') {
     emit('copy-tunnel', tunnel)
+    return
+  }
+  if (action === 'move') {
+    emit('move-tunnel-to-group', { tunnel, groupId: payload })
     return
   }
   emit('delete-tunnel', tunnel)
@@ -385,7 +572,12 @@ function onActionSelect(event, action, tunnel) {
   <section ref="rootRef" class="page-fade panel-card">
     <div class="panel-head">
       <h2 class="panel-title mb-0">{{ $t('app.tunnels.title') }}</h2>
-      <div class="search-box">
+      <div class="panel-head-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary" @click="emit('manage-groups')">
+          <i class="bi bi-folder2 me-1" />
+          {{ $t('app.tunnels.groups.manage') }}
+        </button>
+        <div class="search-box">
         <div class="input-group input-group-sm">
           <span class="input-group-text">
             <i class="bi bi-search"></i>
@@ -408,6 +600,7 @@ function onActionSelect(event, action, tunnel) {
             <i class="bi bi-x"></i>
           </button>
         </div>
+        </div>
       </div>
     </div>
     <div class="table-responsive page-table-wrap tunnels-table-wrap">
@@ -424,63 +617,123 @@ function onActionSelect(event, action, tunnel) {
           </tr>
         </thead>
         <tbody>
-          <tr v-if="tunnels.length === 0">
+          <tr v-if="visibleEntries[0]?.kind === 'empty'">
             <td colspan="7" class="text-muted py-4">{{ $t('app.tunnels.noTunnels') }}</td>
           </tr>
-          <template v-for="tunnel in tunnels" :key="`tunnel-${tunnel.id}`">
-            <tr>
-              <td class="fw-semibold tunnel-name-cell">
-                <TooltipText :text="tunnel.name" class-name="cell-ellipsis" />
+          <template v-for="entry in visibleEntries" :key="entry.key">
+            <tr
+              v-if="entry.kind === 'group'"
+              class="tunnel-group-row"
+              :class="{ 'is-collapsed': isSectionCollapsed(entry.section.key) }"
+              @click="toggleSectionCollapsed(entry.section.key)"
+            >
+              <td colspan="7">
+                <div class="tunnel-group-row-inner">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-link tunnel-group-toggle p-0"
+                    :aria-expanded="!isSectionCollapsed(entry.section.key)"
+                    :aria-label="entry.section.name"
+                    @click.stop="toggleSectionCollapsed(entry.section.key)"
+                  >
+                    <i class="bi" :class="isSectionCollapsed(entry.section.key) ? 'bi-chevron-right' : 'bi-chevron-down'" />
+                  </button>
+                  <span class="tunnel-group-name">{{ entry.section.name }}</span>
+                  <span class="tunnel-group-count text-muted">({{ entry.section.tunnels.length }})</span>
+                    <div v-if="!entry.section.isUngrouped" class="tunnel-group-actions ms-auto" @click.stop>
+                    <div class="btn-group btn-group-sm tunnel-action-menu tunnel-group-menu" role="group">
+                      <button
+                        type="button"
+                        class="btn icon-btn action-menu-toggle dropdown-toggle"
+                        data-bs-toggle="dropdown"
+                        aria-expanded="false"
+                        :title="$t('app.tunnels.actions.more')"
+                        :aria-label="$t('app.tunnels.actions.more')"
+                        @click.stop.prevent="toggleActionDropdown($event)"
+                      >
+                        <i class="bi bi-three-dots action-icon" />
+                      </button>
+                      <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                          <button
+                            type="button"
+                            class="dropdown-item d-flex align-items-center gap-2"
+                            @click="onGroupActionSelect($event, 'rename', entry.section)"
+                          >
+                            <i class="bi bi-pencil opacity-75" />
+                            <span>{{ $t('app.tunnels.groups.rename') }}</span>
+                          </button>
+                        </li>
+                        <li><hr class="dropdown-divider" /></li>
+                        <li>
+                          <button
+                            type="button"
+                            class="dropdown-item d-flex align-items-center gap-2 text-danger"
+                            @click="onGroupActionSelect($event, 'delete', entry.section)"
+                          >
+                            <i class="bi bi-trash3" />
+                            <span>{{ $t('app.tunnels.groups.delete') }}</span>
+                          </button>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
               </td>
-              <td class="tunnel-mode-cell">{{ getModeLabel(tunnel.mode) }}</td>
+            </tr>
+            <tr v-else-if="entry.kind === 'tunnel'">
+              <td class="fw-semibold tunnel-name-cell">
+                <TooltipText :text="entry.tunnel.name" class-name="cell-ellipsis" />
+              </td>
+              <td class="tunnel-mode-cell">{{ getModeLabel(entry.tunnel.mode) }}</td>
               <td class="text-muted tunnel-route-cell">
                 <div class="tunnel-route-wrap">
-                  <TooltipText :text="getRouteTop(tunnel)" class-name="cell-ellipsis route-line" />
-                  <TooltipText :text="getRouteBottom(tunnel)" class-name="cell-ellipsis route-line route-line-secondary" />
+                  <TooltipText :text="getRouteTop(entry.tunnel)" class-name="cell-ellipsis route-line" />
+                  <TooltipText :text="getRouteBottom(entry.tunnel)" class-name="cell-ellipsis route-line route-line-secondary" />
                 </div>
               </td>
               <td class="tunnel-jumper-cell">
-                <TooltipText :text="getTunnelJumperLabel(tunnel)" class-name="cell-ellipsis" />
+                <TooltipText :text="getTunnelJumperLabel(entry.tunnel)" class-name="cell-ellipsis" />
               </td>
               <td class="tunnel-status-cell">
                 <div class="tunnel-status-wrap">
                   <span
                     class="status-badge"
-                    :class="[getStatusBadgeClass(tunnel.status), { 'status-badge-expandable': canToggleErrorDetails(tunnel) }]"
-                    :role="canToggleErrorDetails(tunnel) ? 'button' : undefined"
-                    :tabindex="canToggleErrorDetails(tunnel) ? 0 : undefined"
-                    :aria-label="canToggleErrorDetails(tunnel) ? $t(getErrorToggleLabelKey(tunnel)) : undefined"
-                    :aria-expanded="canToggleErrorDetails(tunnel) ? isErrorExpanded(tunnel.id) : undefined"
-                    @click="toggleErrorDetails(tunnel)"
-                    @keydown.enter.prevent="toggleErrorDetails(tunnel)"
-                    @keydown.space.prevent="toggleErrorDetails(tunnel)"
+                    :class="[getStatusBadgeClass(entry.tunnel.status), { 'status-badge-expandable': canToggleErrorDetails(entry.tunnel) }]"
+                    :role="canToggleErrorDetails(entry.tunnel) ? 'button' : undefined"
+                    :tabindex="canToggleErrorDetails(entry.tunnel) ? 0 : undefined"
+                    :aria-label="canToggleErrorDetails(entry.tunnel) ? $t(getErrorToggleLabelKey(entry.tunnel)) : undefined"
+                    :aria-expanded="canToggleErrorDetails(entry.tunnel) ? isErrorExpanded(entry.tunnel.id) : undefined"
+                    @click="toggleErrorDetails(entry.tunnel)"
+                    @keydown.enter.prevent="toggleErrorDetails(entry.tunnel)"
+                    @keydown.space.prevent="toggleErrorDetails(entry.tunnel)"
                   >
-                    <span>{{ getStatusLabelKey(tunnel.status) ? $t(getStatusLabelKey(tunnel.status)) : tunnel.status }}</span>
+                    <span>{{ getStatusLabelKey(entry.tunnel.status) ? $t(getStatusLabelKey(entry.tunnel.status)) : entry.tunnel.status }}</span>
                     <i
-                      v-if="canToggleErrorDetails(tunnel)"
+                      v-if="canToggleErrorDetails(entry.tunnel)"
                       class="bi status-badge-toggle-icon"
-                      :class="isErrorExpanded(tunnel.id) ? 'bi-chevron-up' : 'bi-chevron-down'"
+                      :class="isErrorExpanded(entry.tunnel.id) ? 'bi-chevron-up' : 'bi-chevron-down'"
                     />
                   </span>
                 </div>
               </td>
               <td class="tunnel-latency-cell text-muted">
-                <span class="cell-ellipsis" :title="getTunnelLatencyLabel(tunnel)">{{ getTunnelLatencyLabel(tunnel) }}</span>
+                <span class="cell-ellipsis" :title="getTunnelLatencyLabel(entry.tunnel)">{{ getTunnelLatencyLabel(entry.tunnel) }}</span>
               </td>
               <td class="text-end tunnels-action-cell">
                 <div class="btn-group btn-group-sm action-btn-group tunnel-action-menu" role="group" aria-label="Tunnel Actions">
                   <IconActionButton
-                    :button-class="getPrimaryActionButtonClass(tunnel.status)"
-                    :title="$t(getPrimaryActionTitle(tunnel.status))"
-                    :aria-label="$t(getPrimaryActionTitle(tunnel.status))"
-                    :icon-class="getPrimaryActionIcon(tunnel.status)"
-                    :disabled="tunnel.status === 'busy'"
-                    @click="$emit('toggle-tunnel', tunnel)"
+                    :button-class="getPrimaryActionButtonClass(entry.tunnel.status)"
+                    :title="$t(getPrimaryActionTitle(entry.tunnel.status))"
+                    :aria-label="$t(getPrimaryActionTitle(entry.tunnel.status))"
+                    :icon-class="getPrimaryActionIcon(entry.tunnel.status)"
+                    :disabled="entry.tunnel.status === 'busy'"
+                    @click="$emit('toggle-tunnel', entry.tunnel)"
                   />
                   <button
                     type="button"
                     class="btn icon-btn action-menu-toggle dropdown-toggle dropdown-toggle-split"
-                    :class="getMenuToggleButtonClass(tunnel.status)"
+                    :class="getMenuToggleButtonClass(entry.tunnel.status)"
                     data-bs-toggle="dropdown"
                     aria-expanded="false"
                     :title="$t('app.tunnels.actions.more')"
@@ -495,8 +748,8 @@ function onActionSelect(event, action, tunnel) {
                       <button
                         type="button"
                         class="dropdown-item d-flex align-items-center gap-2"
-                        :disabled="tunnel.status === 'busy'"
-                        @click="onActionSelect($event, 'edit', tunnel)"
+                        :disabled="entry.tunnel.status === 'busy'"
+                        @click="onActionSelect($event, 'edit', entry.tunnel)"
                       >
                         <i class="bi bi-sliders opacity-75" />
                         <span>{{ $t('app.tunnels.actions.edit') }}</span>
@@ -506,19 +759,41 @@ function onActionSelect(event, action, tunnel) {
                       <button
                         type="button"
                         class="dropdown-item d-flex align-items-center gap-2"
-                        @click="onActionSelect($event, 'copy', tunnel)"
+                        @click="onActionSelect($event, 'copy', entry.tunnel)"
                       >
                         <i class="bi bi-copy opacity-75" />
                         <span>{{ $t('app.tunnels.actions.copy') }}</span>
                       </button>
                     </li>
+                    <li v-if="showGroupedView && getMoveGroupOptions(entry.tunnel).length > 0">
+                      <hr class="dropdown-divider" />
+                    </li>
+                    <template v-if="showGroupedView && getMoveGroupOptions(entry.tunnel).length > 0">
+                      <li class="tunnel-move-group-block">
+                        <div class="tunnel-move-group-title">
+                          <i class="bi bi-folder2 opacity-75" aria-hidden="true" />
+                          <span>{{ $t('app.tunnels.groups.moveTo') }}</span>
+                        </div>
+                        <button
+                          v-for="option in getMoveGroupOptions(entry.tunnel)"
+                          :key="`move-${entry.tunnel.id}-${option.groupId}`"
+                          type="button"
+                          class="dropdown-item tunnel-move-group-option"
+                          :disabled="entry.tunnel.status === 'busy'"
+                          :title="option.label"
+                          @click="onActionSelect($event, 'move', entry.tunnel, option.groupId)"
+                        >
+                          <span class="tunnel-move-group-option-label">{{ option.label }}</span>
+                        </button>
+                      </li>
+                    </template>
                     <li><hr class="dropdown-divider" /></li>
                     <li>
                       <button
                         type="button"
                         class="dropdown-item d-flex align-items-center gap-2 text-danger"
-                        :disabled="tunnel.status === 'busy'"
-                        @click="onActionSelect($event, 'delete', tunnel)"
+                        :disabled="entry.tunnel.status === 'busy'"
+                        @click="onActionSelect($event, 'delete', entry.tunnel)"
                       >
                         <i class="bi bi-trash3" />
                         <span>{{ $t('app.tunnels.actions.delete') }}</span>
@@ -528,36 +803,36 @@ function onActionSelect(event, action, tunnel) {
                 </div>
               </td>
             </tr>
-            <tr v-if="isErrorExpanded(tunnel.id)" class="tunnel-error-detail-row">
+            <tr v-else-if="entry.kind === 'error'" class="tunnel-error-detail-row">
               <td colspan="7">
                 <div class="tunnel-error-detail">
                   <div class="tunnel-error-detail-content">
                     <div class="tunnel-error-detail-label">{{ $t('app.tunnels.errorReason') }}</div>
-                    <div class="tunnel-error-detail-message">{{ tunnel.lastError }}</div>
+                    <div class="tunnel-error-detail-message">{{ entry.tunnel.lastError }}</div>
                     <div v-if="aiDebugEnabled" class="mt-2">
                       <button
                         type="button"
                         class="btn btn-sm btn-outline-primary ai-debug-action-btn"
-                        :disabled="getTunnelAiDebugState(tunnel.id).status === 'analyzing'"
-                        @click="$emit('ai-debug', tunnel)"
+                        :disabled="getTunnelAiDebugState(entry.tunnel.id).status === 'analyzing'"
+                        @click="$emit('ai-debug', entry.tunnel)"
                       >
-                        <i class="bi" :class="getTunnelAiDebugState(tunnel.id).status === 'analyzing' ? 'bi-hourglass-split' : 'bi-magic'" />
-                        <span>{{ getAIDebugActionLabel(tunnel.id) }}</span>
+                        <i class="bi" :class="getTunnelAiDebugState(entry.tunnel.id).status === 'analyzing' ? 'bi-hourglass-split' : 'bi-magic'" />
+                        <span>{{ getAIDebugActionLabel(entry.tunnel.id) }}</span>
                       </button>
-                      <div v-if="getTunnelAiDebugState(tunnel.id).result?.reason" class="tunnel-error-ai-summary mt-2">
-                        {{ getTunnelAiDebugState(tunnel.id).result.reason }}
+                      <div v-if="getTunnelAiDebugState(entry.tunnel.id).result?.reason" class="tunnel-error-ai-summary mt-2">
+                        {{ getTunnelAiDebugState(entry.tunnel.id).result.reason }}
                       </div>
                     </div>
                   </div>
                   <button
                     type="button"
                     class="btn btn-sm tunnel-error-copy-btn"
-                    :class="{ 'is-copied': isErrorCopied(tunnel.id) }"
-                    :aria-label="$t(getErrorCopyLabelKey(tunnel.id))"
-                    :title="$t(getErrorCopyLabelKey(tunnel.id))"
-                    @click="copyErrorDetails(tunnel)"
+                    :class="{ 'is-copied': isErrorCopied(entry.tunnel.id) }"
+                    :aria-label="$t(getErrorCopyLabelKey(entry.tunnel.id))"
+                    :title="$t(getErrorCopyLabelKey(entry.tunnel.id))"
+                    @click="copyErrorDetails(entry.tunnel)"
                   >
-                    <i class="bi" :class="isErrorCopied(tunnel.id) ? 'bi-check2' : 'bi-copy'" />
+                    <i class="bi" :class="isErrorCopied(entry.tunnel.id) ? 'bi-check2' : 'bi-copy'" />
                   </button>
                 </div>
               </td>

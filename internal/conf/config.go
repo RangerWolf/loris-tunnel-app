@@ -48,11 +48,12 @@ func getDefaultConfigDir() string {
 
 // Config is persisted in TOML storage.
 type Config struct {
-	Version int            `toml:"version"`
-	Jumpers []model.Jumper `toml:"jumpers"`
-	Tunnels []model.Tunnel `toml:"tunnels"`
-	AutoRun bool           `toml:"auto_run"`
-	License LicenseConfig  `toml:"license"`
+	Version int                 `toml:"version"`
+	Jumpers []model.Jumper      `toml:"jumpers"`
+	Groups  []model.TunnelGroup `toml:"groups"`
+	Tunnels []model.Tunnel      `toml:"tunnels"`
+	AutoRun bool                `toml:"auto_run"`
+	License LicenseConfig       `toml:"license"`
 }
 
 type LicenseConfig struct {
@@ -80,6 +81,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Version: currentConfigVersion,
 		Jumpers: []model.Jumper{},
+		Groups:  []model.TunnelGroup{},
 		Tunnels: []model.Tunnel{},
 		AutoRun: false,
 		License: LicenseConfig{},
@@ -94,6 +96,7 @@ func (c *Config) Clone() *Config {
 
 	out := &Config{Version: c.Version, AutoRun: c.AutoRun, License: c.License}
 	out.Jumpers = append(out.Jumpers, c.Jumpers...)
+	out.Groups = append(out.Groups, c.Groups...)
 	out.Tunnels = append(out.Tunnels, c.Tunnels...)
 	return out
 }
@@ -105,6 +108,9 @@ func (c *Config) Normalize() {
 	}
 	if c.Jumpers == nil {
 		c.Jumpers = []model.Jumper{}
+	}
+	if c.Groups == nil {
+		c.Groups = []model.TunnelGroup{}
 	}
 	if c.Tunnels == nil {
 		c.Tunnels = []model.Tunnel{}

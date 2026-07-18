@@ -53,6 +53,7 @@ type App struct {
 	ctx       context.Context
 	storage   *conf.Storage
 	jumper    *biz.JumperBiz
+	group     *biz.GroupBiz
 	tunnel    *biz.TunnelBiz
 	updater   *updater.Service
 	license   *license.Client
@@ -87,12 +88,28 @@ func NewApp() *App {
 	return &App{
 		storage:   storage,
 		jumper:    biz.NewJumperBiz(storage),
+		group:     biz.NewGroupBiz(storage),
 		tunnel:    biz.NewTunnelBiz(storage),
-		updater:   updater.NewDefaultService(),
+		updater:   newUpdaterService(),
 		license:   licenseClient,
 		aiDebug:   aidebug.NewService(licenseClient.BaseURL(), machineID),
 		machineID: machineID,
 	}
+}
+
+func newUpdaterService() *updater.Service {
+	if strings.EqualFold(strings.TrimSpace(distributionChannel), "store") {
+		return nil
+	}
+	return updater.NewDefaultService()
+}
+
+// GetDistributionChannel reports the release channel to the frontend.
+func (a *App) GetDistributionChannel() string {
+	if strings.EqualFold(strings.TrimSpace(distributionChannel), "store") {
+		return "store"
+	}
+	return "github"
 }
 
 func detectLogLevel() slog.Level {
@@ -210,7 +227,8 @@ func (a *App) startup(ctx context.Context) {
 	if err := a.ensureReady(); err == nil {
 		a.syncAutoRunWithConfig()
 		go func() {
-			if err := a.tunnel.StartAutoStart(); err != nil {
+			limit := a.tunnelStartLimit()
+			if err := a.tunnel.StartAutoStart(limit); err != nil {
 				slog.Error("auto start tunnel failed", "err", err)
 			}
 		}()
@@ -304,7 +322,7 @@ func (a *App) ensureReady() error {
 	if a.initErr != nil {
 		return a.initErr
 	}
-	if a.storage == nil || a.jumper == nil || a.tunnel == nil {
+	if a.storage == nil || a.jumper == nil || a.group == nil || a.tunnel == nil {
 		return fmt.Errorf("app is not initialized")
 	}
 	return nil
@@ -327,8 +345,13 @@ func (a *App) GetState() (model.State, error) {
 	if err != nil {
 		return model.State{}, err
 	}
+	groups, err := a.group.List()
+	if err != nil {
+		return model.State{}, err
+	}
 	return model.State{
 		Jumpers: append([]model.Jumper{}, jumpers...),
+		Groups:  append([]model.TunnelGroup{}, groups...),
 		Tunnels: append([]model.Tunnel{}, tunnels...),
 	}, nil
 }
@@ -389,6 +412,41 @@ func (a *App) ListTunnels() ([]model.Tunnel, error) {
 	return a.tunnel.List()
 }
 
+func (a *App) ListGroups() ([]model.TunnelGroup, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.group.List()
+}
+
+func (a *App) CreateGroup(payload model.TunnelGroupPayload) (model.TunnelGroup, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.TunnelGroup{}, err
+	}
+	return a.group.Create(payload)
+}
+
+func (a *App) UpdateGroup(id int, payload model.TunnelGroupPayload) (model.TunnelGroup, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.TunnelGroup{}, err
+	}
+	return a.group.Update(id, payload)
+}
+
+func (a *App) DeleteGroup(id int) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	return a.group.Delete(id)
+}
+
+func (a *App) ReorderGroups(ids []int) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	return a.group.Reorder(ids)
+}
+
 func (a *App) CreateTunnel(payload model.TunnelPayload) (model.Tunnel, error) {
 	if err := a.ensureReady(); err != nil {
 		return model.Tunnel{}, err
@@ -401,6 +459,13 @@ func (a *App) UpdateTunnel(id int, payload model.TunnelPayload) (model.Tunnel, e
 		return model.Tunnel{}, err
 	}
 	return a.tunnel.Update(id, payload)
+}
+
+func (a *App) MoveTunnelToGroup(id int, groupID int) (model.Tunnel, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.Tunnel{}, err
+	}
+	return a.tunnel.MoveToGroup(id, groupID)
 }
 
 func (a *App) TestTunnelConnection(payload model.TunnelPayload, inlineJumper *model.JumperPayload) (model.TunnelConnectionTestResult, error) {
@@ -564,7 +629,35 @@ func (a *App) ToggleTunnel(id int) (model.Tunnel, error) {
 	if err := a.ensureReady(); err != nil {
 		return model.Tunnel{}, err
 	}
-	return a.tunnel.Toggle(id)
+	return a.tunnel.Toggle(id, a.tunnelStartLimit())
+}
+
+// tunnelStartLimit returns FreePlanRunningLimit for non-Pro (or when license
+// cannot be verified), and 0 for Pro (unlimited).
+func (a *App) tunnelStartLimit() int {
+	if a.license == nil {
+		return biz.FreePlanRunningLimit
+	}
+	machineID := strings.TrimSpace(a.machineID)
+	if machineID == "" {
+		machineID = device.MachineID()
+		a.machineID = machineID
+	}
+	if machineID == "" {
+		return biz.FreePlanRunningLimit
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	status, err := a.license.GetStatus(ctx, machineID)
+	if err != nil {
+		slog.Warn("license check for tunnel start limit failed; applying free plan limit", "err", err)
+		return biz.FreePlanRunningLimit
+	}
+	if status.Active {
+		return 0
+	}
+	return biz.FreePlanRunningLimit
 }
 
 func collectJumpersForApp(items []model.Jumper, ids []int) ([]model.Jumper, error) {
@@ -839,10 +932,11 @@ func (a *App) ImportConfig(srcPath string) error {
 
 	// Reinitialise biz layer so the new config takes effect.
 	a.jumper = biz.NewJumperBiz(a.storage)
+	a.group = biz.NewGroupBiz(a.storage)
 	a.tunnel = biz.NewTunnelBiz(a.storage)
 
 	// Restart auto-start tunnels.
-	_ = a.tunnel.StartAutoStart()
+	_ = a.tunnel.StartAutoStart(a.tunnelStartLimit())
 
 	slog.Info("config imported", "src", srcPath)
 	return nil

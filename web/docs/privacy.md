@@ -93,7 +93,7 @@ Google's processing of this data is governed by [Google's Privacy Policy](https:
 
 ### 3.6 Update checks (GitHub)
 
-When you check for updates, the App queries the public **GitHub Releases API** for the latest release information. This request is made directly to GitHub and is subject to [GitHub's Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement).
+When you check for updates in the GitHub distribution, the App queries the public **GitHub Releases API** for the latest release information. This request is made directly to GitHub and is subject to [GitHub's Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement). The Microsoft Store distribution does not query GitHub; updates are managed by Microsoft Store.
 
 ---
 

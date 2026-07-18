@@ -2,6 +2,9 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "loris-tunnel",
   "outputfilename": "loris-tunnel",
+  "info": {
+    "productVersion": "1.1.0.0"
+  },
   "frontend:install": "pnpm install",
   "frontend:build": "pnpm run build",
   "frontend:dev:watcher": "pnpm run dev",

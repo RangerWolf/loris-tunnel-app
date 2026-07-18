@@ -109,7 +109,8 @@ func (f *LocalForward) Start() error {
 		return err
 	}
 	if mode == "local" {
-		if err := probeRemoteDial(client, f.tunnel.RemoteHost, f.tunnel.RemotePort); err != nil {
+		probeTimeout := dialTimeoutFromJumper(f.lastJumper())
+		if err := probeRemoteDial(client, f.tunnel.RemoteHost, f.tunnel.RemotePort, probeTimeout); err != nil {
 			closeChain()
 			f.setRunErr(err)
 			slog.Error(

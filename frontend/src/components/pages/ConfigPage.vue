@@ -30,6 +30,10 @@ const props = defineProps({
     type: Boolean,
     required: true
   },
+  isStoreDistribution: {
+    type: Boolean,
+    default: false
+  },
   proExpiryLabel: {
     type: String,
     required: true
@@ -420,6 +424,7 @@ watch(locale, async (newLocale) => {
               <div class="config-desc">{{ appMeta.version }}</div>
             </div>
             <button
+              v-if="!isStoreDistribution"
               type="button"
               class="btn btn-sm btn-secondary position-relative check-updates-btn"
               :disabled="isCheckingUpdates"
@@ -430,6 +435,7 @@ watch(locale, async (newLocale) => {
                 {{ t('config.checkingUpdates') }}
               </span>
             </button>
+            <span v-else class="config-desc text-muted">{{ t('config.storeUpdatesManaged') }}</span>
           </div>
 
           <div class="config-row align-items-center">

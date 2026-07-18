@@ -3,26 +3,32 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, watchEffect
 import { useI18n } from 'vue-i18n'
 import {
   CheckForUpdates as CheckForUpdatesAPI,
+  CreateGroup,
   CreateJumper,
   CreateTunnel,
+  DeleteGroup,
   DeleteJumper,
   DeleteTunnel,
   DebugJumperFailure as DebugJumperFailureAPI,
   DebugSavedTunnelFailure as DebugSavedTunnelFailureAPI,
   DebugTunnelFailure as DebugTunnelFailureAPI,
   GetAutoRunEnabled,
+  GetDistributionChannel,
   GetLicenseStatus as GetLicenseStatusAPI,
   GetSSHConfigImportSources,
   GetStoredLicenseCode,
   GetState,
   LoadSSHConfigJumpersByPath,
+  MoveTunnelToGroup,
   OpenReportEmail,
   RedeemLicenseCode as RedeemLicenseCodeAPI,
+  ReorderGroups,
   SaveUILocale,
   SetAutoRunEnabled,
   TestJumperConnection as TestJumperConnectionAPI,
   TestTunnelConnection as TestTunnelConnectionAPI,
   ToggleTunnel,
+  UpdateGroup,
   UpdateJumper,
   UpdateTunnel
 } from '../wailsjs/go/main/App'
@@ -39,6 +45,7 @@ import AIDebugModal from './components/common/AIDebugModal.vue'
 import JumperModal from './components/modals/JumperModal.vue'
 import ImportJumperModal from './components/modals/ImportJumperModal.vue'
 import TunnelModal from './components/modals/TunnelModal.vue'
+import TunnelGroupModal from './components/modals/TunnelGroupModal.vue'
 import ImportTunnelModal from './components/modals/ImportTunnelModal.vue'
 import './styles/app-shell.css'
 import { AI_DEBUG_ENABLED } from './config/features'
@@ -67,8 +74,12 @@ const authOptions = computed(() => [
 
 const savedTheme = typeof window !== 'undefined' ? window.localStorage.getItem('lt.theme') : null
 const savedSidebarCollapsed = typeof window !== 'undefined' ? window.localStorage.getItem('lt.sidebar.collapsed') : null
+const HIDE_EMPTY_UNGROUPED_STORAGE_KEY = 'lt.tunnel-groups.hide-empty-ungrouped'
+const savedHideEmptyUngrouped =
+  typeof window !== 'undefined' ? window.localStorage.getItem(HIDE_EMPTY_UNGROUPED_STORAGE_KEY) : null
 const theme = ref(savedTheme === 'dark' ? 'dark' : 'light')
 const sidebarCollapsed = ref(savedSidebarCollapsed === '1')
+const hideEmptyUngrouped = ref(savedHideEmptyUngrouped !== '0' && savedHideEmptyUngrouped !== 'false')
 const activePage = ref('overview')
 const selectedLogLevel = ref('all')
 const configMessage = ref('')
@@ -89,8 +100,10 @@ const CONFIG_TOAST_DURATION_MS = 3800
 let configToastTimer = null
 
 const appMeta = reactive({
-  version: '1.0.3.0'
+  version: '1.1.0.0'
 })
+const distributionChannel = ref('github')
+const isStoreDistribution = computed(() => distributionChannel.value === 'store')
 const hasNewVersion = ref(false)
 const proLicense = reactive({
   isPro: false,
@@ -122,8 +135,18 @@ watch(sidebarCollapsed, (collapsed) => {
   }
 })
 
+watch(hideEmptyUngrouped, (enabled) => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(HIDE_EMPTY_UNGROUPED_STORAGE_KEY, enabled ? '1' : '0')
+  }
+})
+
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
+function setHideEmptyUngrouped(enabled) {
+  hideEmptyUngrouped.value = !!enabled
 }
 
 watch(configMessage, (message) => {
@@ -146,6 +169,7 @@ watch(activePage, (pageKey) => {
 })
 
 const jumpers = ref([])
+const tunnelGroups = ref([])
 const tunnels = ref([])
 const jumperSearchQuery = ref('')
 const tunnelSearchQuery = ref('')
@@ -160,6 +184,7 @@ const logs = ref([
 
 const showJumperModal = ref(false)
 const showTunnelModal = ref(false)
+const showTunnelGroupModal = ref(false)
 const showImportJumperModal = ref(false)
 const showImportTunnelModal = ref(false)
 const importJumperLoading = ref(false)
@@ -181,6 +206,8 @@ const inlineJumperForm = reactive(defaultInlineJumperForm())
 const jumperValidationError = ref('')
 const inlineJumperValidationError = ref('')
 const tunnelValidationError = ref('')
+const tunnelGroupModalError = ref('')
+const pendingTunnelGroupEditId = ref(null)
 const actionDialog = reactive({
   visible: false,
   mode: 'alert',
@@ -316,6 +343,7 @@ function defaultJumperForm() {
 function defaultTunnelForm() {
   return {
     name: '',
+    groupId: 0,
     mode: 'local',
     jumperIds: [],
     nextJumperId: '',
@@ -434,6 +462,15 @@ function nameUnits(text) {
   return units
 }
 
+function isTunnelGroupNameTaken(name, excludeId = null) {
+  const normalized = String(name || '').trim().toLowerCase()
+  if (!normalized) return false
+  return tunnelGroups.value.some((group) => {
+    if (excludeId != null && Number(group.id) === Number(excludeId)) return false
+    return String(group.name || '').trim().toLowerCase() === normalized
+  })
+}
+
 function nextId(items) {
   return items.reduce((max, item) => Math.max(max, item.id), 0) + 1
 }
@@ -517,8 +554,10 @@ function getTunnelJumperLabel(tunnel) {
 
 function normalizeTunnelFromBackend(tunnel) {
   const rawLatency = Number(tunnel?.latencyMs)
+  const rawGroupId = Number(tunnel?.groupId)
   return {
     ...tunnel,
+    groupId: Number.isInteger(rawGroupId) && rawGroupId > 0 ? rawGroupId : 0,
     jumperIds: normalizeJumperIdList(tunnel?.jumperIds),
     latencyMs: Number.isFinite(rawLatency) && rawLatency > 0 ? rawLatency : 0
   }
@@ -620,6 +659,7 @@ async function loadStateFromBackend(options = {}) {
   try {
     const state = await GetState()
     jumpers.value = Array.isArray(state?.jumpers) ? state.jumpers : []
+    tunnelGroups.value = Array.isArray(state?.groups) ? state.groups : []
     const backendTunnels = (Array.isArray(state?.tunnels) ? state.tunnels : []).map(normalizeTunnelFromBackend)
     const validTunnelIds = new Set(backendTunnels.map((item) => String(item.id)))
     Object.keys(tunnelErrorAiDebugStates).forEach((key) => {
@@ -731,6 +771,10 @@ async function loadStoredLicenseCode() {
 }
 
 async function checkForUpdates() {
+  if (isStoreDistribution.value) {
+    setConfigMessage(t('config.storeUpdatesManaged'))
+    return
+  }
   if (isCheckingUpdates.value) return
   isCheckingUpdates.value = true
   trackButtonClick('check_updates', 'config')
@@ -773,6 +817,7 @@ async function checkForUpdates() {
 }
 
 async function checkForUpdatesSilently() {
+  if (isStoreDistribution.value) return
   try {
     const result = await CheckForUpdatesAPI(appMeta.version)
     if (result?.hasUpdate) {
@@ -785,6 +830,7 @@ async function checkForUpdatesSilently() {
 }
 
 function openReleasePage() {
+  if (isStoreDistribution.value) return
   openExternalUrl(releasePageUrl.value || DEFAULT_RELEASES_PAGE_URL)
 }
 
@@ -792,15 +838,22 @@ function closeUpdateCheckDialog() {
   updateCheckDialog.visible = false
 }
 
-async function openProUpgrade() {
-  await refreshLicenseStatus({ silent: true })
-
+function openProUpgrade() {
   if (proLicense.isPro) {
     configMessage.value = t('config.messages.proActive', { expiry: proExpiryLabel.value })
     logEvent('info', `Checked Pro expiry (${proExpiryLabel.value})`)
+    void refreshLicenseStatus({ silent: true })
     return
   }
+
   openRedeemDialog()
+  void refreshLicenseStatus({ silent: true }).then((ok) => {
+    if (ok && proLicense.isPro) {
+      closeRedeemDialog(true)
+      configMessage.value = t('config.messages.proActive', { expiry: proExpiryLabel.value })
+      logEvent('info', `Checked Pro expiry (${proExpiryLabel.value})`)
+    }
+  })
 }
 
 function resetJumperValidation() {
@@ -858,6 +911,7 @@ function setAIDebugError(state, message) {
 function buildTunnelPayloadForTest() {
   return {
     name: tunnelForm.name.trim(),
+    groupId: Number(tunnelForm.groupId) || 0,
     mode: tunnelForm.mode,
     jumperIds: normalizeJumperIdList(tunnelForm.jumperIds),
     localHost: tunnelForm.localHost.trim(),
@@ -1172,7 +1226,7 @@ async function testTunnelConnection() {
 
   if (!selectedJumperIds.length && !inlinePayload) {
     tunnelTest.status = 'error'
-    tunnelTest.message = 'Please select at least one jumper.'
+    tunnelTest.message = t('app.modals.tunnel.testSelectJumper')
     tunnelTest.debuggable = false
     return
   }
@@ -1182,13 +1236,13 @@ async function testTunnelConnection() {
 
   if (!payload.name || !payload.localHost || !payload.localPort) {
     tunnelTest.status = 'error'
-    tunnelTest.message = 'Please fill in required fields.'
+    tunnelTest.message = t('app.modals.tunnel.testRequiredFields')
     tunnelTest.debuggable = false
     return
   }
   if (payload.mode !== 'dynamic' && (!payload.remoteHost || !payload.remotePort)) {
     tunnelTest.status = 'error'
-    tunnelTest.message = 'Please fill in required remote host/port.'
+    tunnelTest.message = t('app.modals.tunnel.testRequiredRemote')
     tunnelTest.debuggable = false
     return
   }
@@ -1450,6 +1504,7 @@ async function importTunnels(tunnelsToImport) {
 function fillTunnelFormFromTunnel(tunnel, nameOverride = null) {
   Object.assign(tunnelForm, {
     name: nameOverride ?? tunnel.name,
+    groupId: Number(tunnel.groupId) || 0,
     mode: tunnel.mode,
     jumperIds: normalizeJumperIdList(tunnel.jumperIds),
     nextJumperId: getNextTunnelJumperCandidate(tunnel.jumperIds),
@@ -1558,6 +1613,7 @@ async function saveTunnel() {
       : 'stopped'
     const payload = {
       name: tunnelForm.name.trim(),
+      groupId: Number(tunnelForm.groupId) || 0,
       mode: tunnelForm.mode,
       jumperIds: selectedJumperIds,
       localHost: tunnelForm.localHost.trim(),
@@ -1770,6 +1826,150 @@ function deleteTunnel(tunnel) {
   })
 }
 
+function openTunnelGroupModal(groupId = null) {
+  tunnelGroupModalError.value = ''
+  pendingTunnelGroupEditId.value = groupId
+  showTunnelGroupModal.value = true
+  trackModalOpen('tunnel_group_manage', 'tunnels')
+}
+
+function closeTunnelGroupModal() {
+  showTunnelGroupModal.value = false
+  tunnelGroupModalError.value = ''
+  pendingTunnelGroupEditId.value = null
+}
+
+async function createTunnelGroup(name) {
+  try {
+    tunnelGroupModalError.value = ''
+    const trimmed = String(name || '').trim()
+    if (!trimmed) {
+      tunnelGroupModalError.value = t('app.tunnels.groups.nameRequired')
+      return
+    }
+    if (nameUnits(trimmed) > TUNNEL_LIMITS.name) {
+      tunnelGroupModalError.value = t('app.tunnels.groups.nameTooLong', {
+        max: TUNNEL_LIMITS.name,
+        half: Math.floor(TUNNEL_LIMITS.name / 2)
+      })
+      return
+    }
+    if (isTunnelGroupNameTaken(trimmed)) {
+      tunnelGroupModalError.value = t('app.tunnels.groups.nameDuplicate')
+      return
+    }
+    await CreateGroup({ name: trimmed })
+    await loadStateFromBackend()
+    logEvent('info', `Tunnel group ${name} created`)
+  } catch (err) {
+    const message = errorMessage(err, 'Failed to create tunnel group.')
+    tunnelGroupModalError.value = /group name already exists/i.test(message)
+      ? t('app.tunnels.groups.nameDuplicate')
+      : message
+  }
+}
+
+async function renameTunnelGroup({ id, name }) {
+  try {
+    tunnelGroupModalError.value = ''
+    const trimmed = String(name || '').trim()
+    if (!trimmed) {
+      tunnelGroupModalError.value = t('app.tunnels.groups.nameRequired')
+      return
+    }
+    if (nameUnits(trimmed) > TUNNEL_LIMITS.name) {
+      tunnelGroupModalError.value = t('app.tunnels.groups.nameTooLong', {
+        max: TUNNEL_LIMITS.name,
+        half: Math.floor(TUNNEL_LIMITS.name / 2)
+      })
+      return
+    }
+    if (isTunnelGroupNameTaken(trimmed, id)) {
+      tunnelGroupModalError.value = t('app.tunnels.groups.nameDuplicate')
+      return
+    }
+    await UpdateGroup(id, { name: trimmed })
+    await loadStateFromBackend()
+    logEvent('info', `Tunnel group ${name} updated`)
+  } catch (err) {
+    const message = errorMessage(err, 'Failed to rename tunnel group.')
+    tunnelGroupModalError.value = /group name already exists/i.test(message)
+      ? t('app.tunnels.groups.nameDuplicate')
+      : message
+  }
+}
+
+function requestRenameTunnelGroup(group) {
+  openTunnelGroupModal(group?.id ?? null)
+}
+
+function deleteTunnelGroup(group) {
+  openActionDialog({
+    mode: 'confirm',
+    message: t('app.confirmations.deleteTunnelGroup', { name: group.name }),
+    confirmButtonClass: 'btn-danger',
+    onConfirm: async () => {
+      try {
+        tunnelGroupModalError.value = ''
+        await DeleteGroup(group.id)
+        await loadStateFromBackend()
+        logEvent('warn', `Tunnel group ${group.name} deleted`)
+      } catch (err) {
+        const message = errorMessage(err, `Failed to delete tunnel group ${group.name}`)
+        tunnelGroupModalError.value = message
+        logEvent('error', message)
+      }
+    }
+  })
+}
+
+async function reorderTunnelGroups(ids) {
+  const orderedIds = (Array.isArray(ids) ? ids : []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+  if (orderedIds.length === 0) return
+
+  const currentIds = tunnelGroups.value.map((group) => Number(group.id))
+  if (
+    orderedIds.length === currentIds.length &&
+    orderedIds.every((id, index) => id === currentIds[index])
+  ) {
+    return
+  }
+
+  try {
+    tunnelGroupModalError.value = ''
+    await ReorderGroups(orderedIds)
+    await loadStateFromBackend()
+    logEvent('info', 'Tunnel groups reordered')
+  } catch (err) {
+    const message = errorMessage(err, 'Failed to reorder tunnel groups.')
+    tunnelGroupModalError.value = message
+    logEvent('error', message)
+    await loadStateFromBackend()
+  }
+}
+
+async function moveTunnelToGroup({ tunnel, groupId }) {
+  if (!tunnel?.id) return
+  const normalizedGroupId = Number(groupId) || 0
+  if (normalizedGroupId === (Number(tunnel.groupId) || 0)) return
+  if (tunnel.status === 'busy') return
+
+  const groupName = normalizedGroupId === 0
+    ? t('app.tunnels.groups.ungrouped')
+    : (tunnelGroups.value.find((group) => Number(group.id) === normalizedGroupId)?.name || String(normalizedGroupId))
+
+  try {
+    await MoveTunnelToGroup(tunnel.id, normalizedGroupId)
+    await loadStateFromBackend()
+    setConfigMessage(t('app.tunnels.groups.moved', { name: tunnel.name, group: groupName }))
+    logEvent('info', `Tunnel ${tunnel.name} moved to group ${groupName}`)
+  } catch (err) {
+    const message = errorMessage(err, `Failed to move tunnel ${tunnel.name}`)
+    setConfigMessage(message)
+    logEvent('error', message)
+  }
+}
+
 function deleteJumper(jumper) {
   trackJumperAction('delete', jumper.name)
   const inUseBy = tunnels.value.filter((item) => normalizeJumperIdList(item.jumperIds).includes(jumper.id))
@@ -1808,6 +2008,12 @@ onMounted(async () => {
     /* tray locale sync is best-effort */
   }
   await loadStoredLicenseCode()
+  try {
+    const channel = String(await GetDistributionChannel() || '').trim().toLowerCase()
+    if (channel === 'store') distributionChannel.value = 'store'
+  } catch (_) {
+    // GitHub is the safe default for development/older bindings.
+  }
   const licenseStatusReady = await refreshLicenseStatus({ silent: true })
   // If launch at login is on but user is not Pro or expired, disable it and show upgrade prompt
   try {
@@ -1854,6 +2060,7 @@ watch(
 
 
 <template>
+  <div class="app-root">
   <div class="app-shell">
     <AppSidebar
       :pages="pages"
@@ -1909,6 +2116,8 @@ watch(
         <TunnelsPage
           v-if="activePage === 'tunnels'"
           :tunnels="filteredTunnels"
+          :groups="tunnelGroups"
+          :hide-empty-ungrouped="hideEmptyUngrouped"
           :search-query="tunnelSearchQuery"
           :mode-options="modeOptions"
           :tunnel-ai-debug-states="tunnelErrorAiDebugStates"
@@ -1920,6 +2129,10 @@ watch(
           @edit-tunnel="editTunnel"
           @delete-tunnel="deleteTunnel"
           @ai-debug="openSavedTunnelAIDebug"
+          @manage-groups="openTunnelGroupModal()"
+          @rename-group="requestRenameTunnelGroup"
+          @delete-group="deleteTunnelGroup"
+          @move-tunnel-to-group="moveTunnelToGroup"
         />
 
         <LogsPage
@@ -1933,6 +2146,7 @@ watch(
           v-if="activePage === 'config'"
           :theme="theme"
           :app-meta="appMeta"
+          :is-store-distribution="isStoreDistribution"
           :is-pro="isPro"
           :pro-expiry-label="proExpiryLabel"
           :license-code="proLicense.code"
@@ -2102,6 +2316,8 @@ watch(
     :show="showTunnelModal"
     :editing-tunnel-id="editingTunnelId"
     :tunnel-form="tunnelForm"
+    :tunnels="tunnels"
+    :groups="tunnelGroups"
     :mode-options="modeOptions"
     :jumpers="jumpers"
     :inline-jumper-form="inlineJumperForm"
@@ -2128,6 +2344,21 @@ watch(
     @report-ai-content="reportAIDebugContent('tunnel', tunnelAiDebug)"
   />
 
+  <TunnelGroupModal
+    :show="showTunnelGroupModal"
+    :groups="tunnelGroups"
+    :hide-empty-ungrouped="hideEmptyUngrouped"
+    :initial-edit-group-id="pendingTunnelGroupEditId"
+    :error-message="tunnelGroupModalError"
+    :name-max-length="TUNNEL_LIMITS.name"
+    @close="closeTunnelGroupModal"
+    @create-group="createTunnelGroup"
+    @rename-group="renameTunnelGroup"
+    @delete-group="deleteTunnelGroup"
+    @reorder-groups="reorderTunnelGroups"
+    @update:hide-empty-ungrouped="setHideEmptyUngrouped"
+  />
+
   <ImportTunnelModal
     :show="showImportTunnelModal"
     :jumpers="jumpers"
@@ -2139,4 +2370,5 @@ watch(
     @close="closeImportTunnel"
     @import="importTunnels"
   />
+  </div>
 </template>

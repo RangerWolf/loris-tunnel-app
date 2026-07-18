@@ -98,10 +98,28 @@
                 "stopped": "Остановлен",
                 "busy": "Занят",
                 "error": "Ошибка"
+            },
+            "groups": {
+                "manage": "Управление группами",
+                "manageTitle": "Группы туннелей",
+                "create": "Создать группу",
+                "newGroupPlaceholder": "Название группы",
+                "empty": "Групп пока нет. Создайте группу для организации туннелей.",
+                "ungrouped": "Без группы",
+                "rename": "Переименовать",
+                "delete": "Удалить группу",
+                "moveTo": "Переместить в группу",
+                "moveToNamed": "Переместить в {name}",
+                "moved": "«{name}» перемещён в {group}",
+                "nameRequired": "Укажите название группы.",
+                "nameTooLong": "Название группы: не более {max} латинских символов или {half} иероглифов.",
+                "nameDuplicate": "Группа с таким названием уже существует.",
+                "hideEmptyUngrouped": "Скрывать «Без группы», если пусто"
             }
         },
         "confirmations": {
             "deleteTunnel": "Удалить туннель «{name}»?",
+            "deleteTunnelGroup": "Удалить группу «{name}»? Туннели будут перемещены в «Без группы».",
             "deleteJumper": "Удалить прыжковый сервер «{name}»?",
             "deleteJumperBlocked": "Нельзя удалить «{name}»: используется в {count} туннеле(ях)."
         },
@@ -210,8 +228,10 @@
                 "editTitle": "Изменить туннель",
                 "name": "Имя",
                 "mode": "Режим",
+                "group": "Группа",
                 "localHost": "Локальный хост",
                 "localPort": "Локальный порт",
+                "localPortInUseWarning": "Локальный порт {port} уже используется другой конфигурацией туннеля: {names} (только предупреждение, сохранение не блокируется)",
                 "remoteHost": "Удалённый хост",
                 "remotePort": "Удалённый порт",
                 "jumpers": "Прыжковые серверы",
@@ -236,6 +256,9 @@
                 "saveTunnel": "Сохранить туннель",
                 "testConnection": "Проверить подключение",
                 "testing": "Проверка...",
+                "testRequiredFields": "Заполните обязательные поля.",
+                "testRequiredRemote": "Укажите удалённый хост и порт.",
+                "testSelectJumper": "Выберите хотя бы один прыжковый сервер.",
                 "testPassedWithLatency": "Проверка успешна. Задержка SSH: {latency}."
             }
         },
@@ -331,6 +354,7 @@
         "freeVersion": "Бесплатная версия",
         "checkUpdates": "Проверить обновления",
         "checkingUpdates": "Проверка...",
+        "storeUpdatesManaged": "Обновления управляются Microsoft Store.",
         "updateResultTitle": "Результат проверки",
         "noUpdatesAvailable": "Нет доступных обновлений.",
         "latestVersionIs": "Доступна новая версия: {version}",
@@ -346,7 +370,7 @@
             "title": "Введите код лицензии",
             "codeLabel": "Код лицензии",
             "codePlaceholder": "Например: VIP-XXXX-XXXX-XXXX-XXXX",
-            "codeHint": "Сейчас функция все еще в закрытом тестировании. Напишите на yang.rangerwolf@gmail.com, чтобы получить код лицензии.",
+            "codeHint": "Сейчас функция все еще в закрытом тестировании. Напишите на yang.rangerwolf{'@'}gmail.com, чтобы получить код лицензии.",
             "submitting": "Отправка..."
         },
         "configFile": "Файл конфигурации",

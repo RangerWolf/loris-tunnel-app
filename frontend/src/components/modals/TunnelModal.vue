@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Tooltip } from 'bootstrap'
 import AIDebugResultCard from '../common/AIDebugResultCard.vue'
 
@@ -15,6 +16,14 @@ const props = defineProps({
   tunnelForm: {
     type: Object,
     required: true
+  },
+  tunnels: {
+    type: Array,
+    default: () => []
+  },
+  groups: {
+    type: Array,
+    default: () => []
   },
   modeOptions: {
     type: Array,
@@ -84,9 +93,35 @@ const emit = defineEmits([
   'report-ai-content'
 ])
 
+const { t } = useI18n()
 const selectedJumpersHintRef = ref(null)
 const showMoreJumpers = ref(false)
 let selectedJumpersTooltip = null
+
+const localPortConflictTunnels = computed(() => {
+  const port = Number(props.tunnelForm?.localPort)
+  if (!Number.isInteger(port) || port < 1) return []
+  const editingId = Number(props.editingTunnelId)
+  return (Array.isArray(props.tunnels) ? props.tunnels : []).filter((tunnel) => {
+    const tunnelPort = Number(tunnel?.localPort)
+    if (!Number.isInteger(tunnelPort) || tunnelPort !== port) return false
+    if (Number.isInteger(editingId) && editingId > 0 && Number(tunnel?.id) === editingId) return false
+    return true
+  })
+})
+
+const localPortConflictWarning = computed(() => {
+  const conflicts = localPortConflictTunnels.value
+  if (conflicts.length === 0) return ''
+  const names = conflicts
+    .map((tunnel) => String(tunnel?.name || '').trim())
+    .filter(Boolean)
+    .join(', ')
+  return t('app.modals.tunnel.localPortInUseWarning', {
+    port: Number(props.tunnelForm.localPort),
+    names: names || String(conflicts.length)
+  })
+})
 
 const selectedJumperIds = computed(() => {
   const rawIds = Array.isArray(props.tunnelForm?.jumperIds) ? props.tunnelForm.jumperIds : []
@@ -211,7 +246,7 @@ function onPrimaryJumperChange(event) {
         @submit.prevent="$emit('submit')"
       >
         <div class="row g-3">
-          <div class="col-md-6">
+          <div :class="groups.length > 0 ? 'col-md-4' : 'col-md-6'">
             <label class="form-label">{{ $t('app.modals.tunnel.name') }}</label>
             <input
               v-model="tunnelForm.name"
@@ -224,7 +259,16 @@ function onPrimaryJumperChange(event) {
               required
             />
           </div>
-          <div class="col-md-6">
+          <div v-if="groups.length > 0" class="col-md-4">
+            <label class="form-label">{{ $t('app.modals.tunnel.group') }}</label>
+            <select v-model.number="tunnelForm.groupId" class="form-select">
+              <option :value="0">{{ $t('app.tunnels.groups.ungrouped') }}</option>
+              <option v-for="group in groups" :key="group.id" :value="group.id">
+                {{ group.name }}
+              </option>
+            </select>
+          </div>
+          <div :class="groups.length > 0 ? 'col-md-4' : 'col-md-6'">
             <label class="form-label">{{ $t('app.modals.tunnel.mode') }}</label>
             <select v-model="tunnelForm.mode" class="form-select">
               <option v-for="mode in modeOptions" :key="mode.value" :value="mode.value">
@@ -232,7 +276,7 @@ function onPrimaryJumperChange(event) {
               </option>
             </select>
           </div>
-          <div class="col-md-6">
+          <div class="col-md-12">
             <div class="tunnel-endpoint-grid">
               <div>
                 <label class="form-label">{{ $t('app.modals.tunnel.localHost') }}</label>
@@ -248,11 +292,19 @@ function onPrimaryJumperChange(event) {
               </div>
               <div class="tunnel-port-field">
                 <label class="form-label">{{ $t('app.modals.tunnel.localPort') }}</label>
-                <input v-model.number="tunnelForm.localPort" class="form-control" type="number" min="1" required />
+                <input
+                  v-model.number="tunnelForm.localPort"
+                  class="form-control"
+                  :class="{ 'is-warning': !!localPortConflictWarning }"
+                  type="number"
+                  min="1"
+                  required
+                />
               </div>
             </div>
+            <div v-if="localPortConflictWarning" class="field-warning mt-1">{{ localPortConflictWarning }}</div>
           </div>
-          <div class="col-md-6">
+          <div class="col-md-12">
             <div class="tunnel-endpoint-grid">
               <div>
                 <label class="form-label">{{ $t('app.modals.tunnel.remoteHost') }}</label>

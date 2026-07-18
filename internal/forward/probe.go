@@ -83,19 +83,61 @@ func TestTunnelConnection(tunnel model.Tunnel, jumpers []model.Jumper) (time.Dur
 		return latency, nil
 	}
 
-	if err := probeRemoteDial(client, tunnel.RemoteHost, tunnel.RemotePort); err != nil {
+	timeout := dialTimeoutFromJumpers(jumpers)
+	if err := probeRemoteDial(client, tunnel.RemoteHost, tunnel.RemotePort, timeout); err != nil {
 		return 0, err
 	}
 	return latency, nil
 }
 
-func probeRemoteDial(client *ssh.Client, remoteHost string, remotePort int) error {
-	addr := net.JoinHostPort(strings.TrimSpace(remoteHost), strconv.Itoa(remotePort))
-	remoteConn, err := client.Dial("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("remote dial %s failed: %w", addr, err)
+func dialTimeoutFromJumpers(jumpers []model.Jumper) time.Duration {
+	if len(jumpers) == 0 {
+		return 5 * time.Second
 	}
-	return remoteConn.Close()
+	return dialTimeoutFromJumper(jumpers[len(jumpers)-1])
+}
+
+func dialTimeoutFromJumper(jumper model.Jumper) time.Duration {
+	timeout := time.Duration(jumper.TimeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		return 5 * time.Second
+	}
+	return timeout
+}
+
+func probeRemoteDial(client *ssh.Client, remoteHost string, remotePort int, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+
+	addr := net.JoinHostPort(strings.TrimSpace(remoteHost), strconv.Itoa(remotePort))
+
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+
+	ch := make(chan dialResult, 1)
+	go func() {
+		conn, err := client.Dial("tcp", addr)
+		select {
+		case ch <- dialResult{conn: conn, err: err}:
+		default:
+			if conn != nil {
+				_ = conn.Close()
+			}
+		}
+	}()
+
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			return fmt.Errorf("remote dial %s failed: %w", addr, res.err)
+		}
+		return res.conn.Close()
+	case <-time.After(timeout):
+		return fmt.Errorf("remote dial %s timed out after %s", addr, timeout)
+	}
 }
 
 func probeRemoteListen(client *ssh.Client, remoteHost string, remotePort int) error {

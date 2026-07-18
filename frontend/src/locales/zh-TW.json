@@ -98,10 +98,28 @@
                 "stopped": "已停止",
                 "busy": "處理中",
                 "error": "錯誤"
+            },
+            "groups": {
+                "manage": "管理分組",
+                "manageTitle": "管理隧道分組",
+                "create": "新建分組",
+                "newGroupPlaceholder": "輸入分組名稱",
+                "empty": "暫無分組，建立後可整理隧道列表。",
+                "ungrouped": "未分組",
+                "rename": "重新命名",
+                "delete": "刪除分組",
+                "moveTo": "移動到分組",
+                "moveToNamed": "移動到 {name}",
+                "moved": "已將「{name}」移動到 {group}",
+                "nameRequired": "請輸入分組名稱。",
+                "nameTooLong": "分組名稱不超過 {max} 個英文字符或 {half} 個漢字。",
+                "nameDuplicate": "已存在同名分組，請使用其他名稱。",
+                "hideEmptyUngrouped": "未分組為空時隱藏"
             }
         },
         "confirmations": {
             "deleteTunnel": "確認刪除隧道「{name}」嗎？",
+            "deleteTunnelGroup": "確認刪除分組「{name}」嗎？該分組下的隧道將移至未分組。",
             "deleteJumper": "確認刪除跳板機「{name}」嗎？",
             "deleteJumperBlocked": "無法刪除跳板機「{name}」，它正被 {count} 條隧道使用。"
         },
@@ -210,8 +228,10 @@
                 "editTitle": "編輯隧道",
                 "name": "名稱",
                 "mode": "模式",
+                "group": "所屬分組",
                 "localHost": "本機主機",
                 "localPort": "本機連接埠",
+                "localPortInUseWarning": "本機連接埠 {port} 已被其他隧道設定使用：{names}（僅提示，不阻止儲存）",
                 "remoteHost": "遠端主機",
                 "remotePort": "遠端連接埠",
                 "jumpers": "跳板機",
@@ -236,6 +256,9 @@
                 "saveTunnel": "儲存隧道",
                 "testConnection": "測試連線",
                 "testing": "測試中...",
+                "testRequiredFields": "請填寫必填項。",
+                "testRequiredRemote": "請填寫遠端主機和遠端連接埠。",
+                "testSelectJumper": "請至少選擇一台跳板機。",
                 "testPassedWithLatency": "連線測試通過，SSH 延遲：{latency}。"
             }
         },
@@ -331,6 +354,7 @@
         "freeVersion": "免費版",
         "checkUpdates": "檢查更新",
         "checkingUpdates": "檢查中...",
+        "storeUpdatesManaged": "更新由 Microsoft Store 管理。",
         "updateResultTitle": "檢查更新結果",
         "noUpdatesAvailable": "無可用更新",
         "latestVersionIs": "發現新版本：{version}",
@@ -346,7 +370,7 @@
             "title": "輸入註冊碼",
             "codeLabel": "註冊碼",
             "codePlaceholder": "例如：VIP-XXXX-XXXX-XXXX-XXXX",
-            "codeHint": "目前還處於內測階段，可以發郵件到 yang.rangerwolf@gmail.com 獲取註冊碼",
+            "codeHint": "目前還處於內測階段，可以發郵件到 yang.rangerwolf{'@'}gmail.com 獲取註冊碼",
             "submitting": "提交中..."
         },
         "configFile": "設定檔",

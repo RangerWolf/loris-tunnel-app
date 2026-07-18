@@ -98,10 +98,28 @@
                 "stopped": "已停止",
                 "busy": "处理中",
                 "error": "错误"
+            },
+            "groups": {
+                "manage": "管理分组",
+                "manageTitle": "管理隧道分组",
+                "create": "新建分组",
+                "newGroupPlaceholder": "输入分组名称",
+                "empty": "暂无分组，创建后可整理隧道列表。",
+                "ungrouped": "未分组",
+                "rename": "重命名",
+                "delete": "删除分组",
+                "moveTo": "移动到分组",
+                "moveToNamed": "移动到 {name}",
+                "moved": "已将「{name}」移动到 {group}",
+                "nameRequired": "请输入分组名称。",
+                "nameTooLong": "分组名称不超过 {max} 个英文字符或 {half} 个汉字。",
+                "nameDuplicate": "已存在同名分组，请使用其他名称。",
+                "hideEmptyUngrouped": "未分组为空时隐藏"
             }
         },
         "confirmations": {
             "deleteTunnel": "确认删除隧道 \"{name}\" 吗？",
+            "deleteTunnelGroup": "确认删除分组 \"{name}\" 吗？该分组下的隧道将移至未分组。",
             "deleteJumper": "确认删除跳板机 \"{name}\" 吗？",
             "deleteJumperBlocked": "无法删除跳板机 \"{name}\"，它正被 {count} 条隧道使用。"
         },
@@ -210,8 +228,10 @@
                 "editTitle": "编辑隧道",
                 "name": "名称",
                 "mode": "模式",
+                "group": "所属分组",
                 "localHost": "本地主机",
                 "localPort": "本地端口",
+                "localPortInUseWarning": "本地端口 {port} 已被其他隧道配置使用：{names}（仅提示，不阻止保存）",
                 "remoteHost": "远程主机",
                 "remotePort": "远程端口",
                 "jumpers": "跳板机",
@@ -236,6 +256,9 @@
                 "saveTunnel": "保存隧道",
                 "testConnection": "测试连接",
                 "testing": "测试中...",
+                "testRequiredFields": "请填写必填项。",
+                "testRequiredRemote": "请填写远程主机和远程端口。",
+                "testSelectJumper": "请至少选择一台跳板机。",
                 "testPassedWithLatency": "连接测试通过，SSH 延迟：{latency}。"
             }
         },
@@ -340,6 +363,7 @@
         "freeVersion": "免费版",
         "checkUpdates": "检查更新",
         "checkingUpdates": "检查中...",
+        "storeUpdatesManaged": "更新由 Microsoft Store 管理。",
         "updateResultTitle": "检查更新结果",
         "noUpdatesAvailable": "无可用更新",
         "latestVersionIs": "发现新版本：{version}",
@@ -355,7 +379,7 @@
             "title": "输入注册码",
             "codeLabel": "注册码",
             "codePlaceholder": "例如：VIP-XXXX-XXXX-XXXX-XXXX",
-            "codeHint": "目前还处于内测阶段，可以发邮件到 yang.rangerwolf@gmail.com 获取注册码",
+            "codeHint": "目前还处于内测阶段，可以发邮件到 yang.rangerwolf{'@'}gmail.com 获取注册码",
             "submitting": "提交中..."
         },
         "configFile": "配置文件",
