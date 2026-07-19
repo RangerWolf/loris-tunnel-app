@@ -18,6 +18,8 @@ import {
   GetSSHConfigImportSources,
   GetStoredLicenseCode,
   GetState,
+  GetTrafficMonitorEnabled,
+  GetTrafficStats,
   LoadSSHConfigJumpersByPath,
   MoveTunnelToGroup,
   OpenReportEmail,
@@ -100,7 +102,7 @@ const CONFIG_TOAST_DURATION_MS = 3800
 let configToastTimer = null
 
 const appMeta = reactive({
-  version: '1.1.0.0'
+  version: '1.1.2.0'
 })
 const distributionChannel = ref('github')
 const isStoreDistribution = computed(() => distributionChannel.value === 'store')
@@ -174,9 +176,16 @@ const tunnels = ref([])
 const jumperSearchQuery = ref('')
 const tunnelSearchQuery = ref('')
 const STATE_SYNC_INTERVAL_MS = 5000
+const TRAFFIC_SYNC_INTERVAL_MS = 1000
+const TRAFFIC_HISTORY_LEN = 40
 const pendingToggleTunnelIds = new Set()
 let stateSyncTimer = null
+let trafficSyncTimer = null
 let stateSyncInFlight = false
+const trafficMonitorEnabled = ref(true)
+const traffic = ref({ upBps: 0, downBps: 0 })
+const trafficHistoryUp = ref([])
+const trafficHistoryDown = ref([])
 
 const logs = ref([
   { id: 1, level: 'info', time: nowLabel(), message: 'Config storage mode: TOML' }
@@ -702,6 +711,50 @@ function syncStateSilently() {
   loadStateFromBackend({ silent: true }).finally(() => {
     stateSyncInFlight = false
   })
+}
+
+function pushTrafficHistory(target, value) {
+  const next = Math.max(0, Number(value) || 0)
+  target.value = [...target.value, next].slice(-TRAFFIC_HISTORY_LEN)
+}
+
+async function syncTrafficSilently() {
+  if (!trafficMonitorEnabled.value) return
+  try {
+    const stats = await GetTrafficStats()
+    const upBps = Number(stats?.upBps) || 0
+    const downBps = Number(stats?.downBps) || 0
+    traffic.value = { upBps, downBps }
+    pushTrafficHistory(trafficHistoryUp, upBps)
+    pushTrafficHistory(trafficHistoryDown, downBps)
+  } catch (_) {
+    // best-effort background sync
+  }
+}
+
+function stopTrafficSync() {
+  if (trafficSyncTimer !== null) {
+    window.clearInterval(trafficSyncTimer)
+    trafficSyncTimer = null
+  }
+  traffic.value = { upBps: 0, downBps: 0 }
+  trafficHistoryUp.value = []
+  trafficHistoryDown.value = []
+}
+
+function startTrafficSync() {
+  if (!trafficMonitorEnabled.value || trafficSyncTimer !== null) return
+  void syncTrafficSilently()
+  trafficSyncTimer = window.setInterval(syncTrafficSilently, TRAFFIC_SYNC_INTERVAL_MS)
+}
+
+function onTrafficMonitorChange(enabled) {
+  trafficMonitorEnabled.value = !!enabled
+  if (trafficMonitorEnabled.value) {
+    startTrafficSync()
+  } else {
+    stopTrafficSync()
+  }
 }
 
 function switchPage(pageKey) {
@@ -2025,7 +2078,13 @@ onMounted(async () => {
   } catch (err) {
     logEvent('error', errorMessage(err, 'Failed to check or reset launch-at-login (AutoRun).'))
   }
+  try {
+    trafficMonitorEnabled.value = await GetTrafficMonitorEnabled()
+  } catch (_) {
+    trafficMonitorEnabled.value = true
+  }
   stateSyncTimer = window.setInterval(syncStateSilently, STATE_SYNC_INTERVAL_MS)
+  startTrafficSync()
   void checkForUpdatesSilently()
 })
 
@@ -2034,6 +2093,7 @@ onBeforeUnmount(() => {
     window.clearInterval(stateSyncTimer)
     stateSyncTimer = null
   }
+  stopTrafficSync()
   if (configToastTimer !== null) {
     window.clearTimeout(configToastTimer)
     configToastTimer = null
@@ -2070,6 +2130,10 @@ watch(
       :pro-expiry-label="proExpiryLabel"
       :has-new-version="hasNewVersion"
       :collapsed="sidebarCollapsed"
+      :traffic-monitor-enabled="trafficMonitorEnabled"
+      :traffic="traffic"
+      :traffic-history-up="trafficHistoryUp"
+      :traffic-history-down="trafficHistoryDown"
       @switch-page="switchPage"
       @upgrade="openProUpgrade"
       @open-release-page="openReleasePage"
@@ -2163,6 +2227,7 @@ watch(
           @set-config-message="setConfigMessage"
           @reload-state="loadStateFromBackend"
           @confirm-action="openActionDialog"
+          @traffic-monitor-change="onTrafficMonitorChange"
         />
       </main>
 

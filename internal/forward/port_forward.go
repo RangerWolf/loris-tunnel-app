@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"loris-tunnel/internal/model"
@@ -64,6 +65,8 @@ type LocalForward struct {
 	events      chan RuntimeEvent
 	keepStop    chan struct{}
 	lastLatency time.Duration
+	bytesUp     atomic.Uint64
+	bytesDown   atomic.Uint64
 	stopOnce    sync.Once
 	wg          sync.WaitGroup
 }
@@ -235,6 +238,10 @@ func (f *LocalForward) LastLatency() (time.Duration, bool) {
 	return f.lastLatency, true
 }
 
+func (f *LocalForward) Traffic() (up, down uint64) {
+	return f.bytesUp.Load(), f.bytesDown.Load()
+}
+
 func (f *LocalForward) serveLocal(done chan struct{}) {
 	defer close(done)
 
@@ -333,7 +340,7 @@ func (f *LocalForward) handleLocalConn(localConn net.Conn, client *ssh.Client) {
 		return
 	}
 
-	bridge(localConn, remoteConn)
+	f.bridge(localConn, remoteConn)
 }
 
 func (f *LocalForward) handleDynamicConn(localConn net.Conn, client *ssh.Client) {
@@ -356,7 +363,7 @@ func (f *LocalForward) handleDynamicConn(localConn net.Conn, client *ssh.Client)
 		return
 	}
 
-	bridge(localConn, remoteConn)
+	f.bridge(localConn, remoteConn)
 }
 
 func (f *LocalForward) handleRemoteConn(remoteConn net.Conn) {
@@ -370,7 +377,7 @@ func (f *LocalForward) handleRemoteConn(remoteConn net.Conn) {
 		_ = remoteConn.Close()
 		return
 	}
-	bridge(remoteConn, localConn)
+	f.bridge(localConn, remoteConn)
 }
 
 func (f *LocalForward) monitorClientLifecycle(client *ssh.Client) {
@@ -747,23 +754,41 @@ func (f *LocalForward) bindRemoteListener(client *ssh.Client) (net.Listener, err
 	return ln, nil
 }
 
-func bridge(c1, c2 net.Conn) {
-	defer c1.Close()
-	defer c2.Close()
+type countingConnReader struct {
+	net.Conn
+	counter *atomic.Uint64
+}
+
+func (c *countingConnReader) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if n > 0 {
+		c.counter.Add(uint64(n))
+	}
+	return n, err
+}
+
+func (f *LocalForward) bridge(local, remote net.Conn) {
+	defer local.Close()
+	defer remote.Close()
 
 	done := make(chan struct{}, 2)
 
 	go func() {
-		_, _ = io.Copy(c1, c2)
+		_, _ = io.Copy(remote, &countingConnReader{Conn: local, counter: &f.bytesUp})
 		done <- struct{}{}
 	}()
 
 	go func() {
-		_, _ = io.Copy(c2, c1)
+		_, _ = io.Copy(local, &countingConnReader{Conn: remote, counter: &f.bytesDown})
 		done <- struct{}{}
 	}()
 
 	<-done
+}
+
+// Bridge exposes connection bridging for integration tests.
+func (f *LocalForward) Bridge(local, remote net.Conn) {
+	f.bridge(local, remote)
 }
 
 func dialSSH(jumper model.Jumper) (*ssh.Client, error) {

@@ -3,7 +3,9 @@ import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   GetAutoRunEnabled,
+  GetTrafficMonitorEnabled,
   SetAutoRunEnabled,
+  SetTrafficMonitorEnabled,
   ExportConfigWithDialog,
   SelectImportFile,
   ImportConfig,
@@ -69,11 +71,13 @@ const emit = defineEmits([
   'refresh-license-status',
   'set-config-message',
   'reload-state',
-  'confirm-action'
+  'confirm-action',
+  'traffic-monitor-change'
 ])
 
 const { t, locale } = useI18n()
 const autoRunEnabled = ref(false)
+const trafficMonitorEnabled = ref(true)
 const configBusy = ref('')
 const configLocationInfo = ref(null)
 
@@ -82,6 +86,11 @@ onMounted(async () => {
     autoRunEnabled.value = await GetAutoRunEnabled()
   } catch (_) {
     autoRunEnabled.value = false
+  }
+  try {
+    trafficMonitorEnabled.value = await GetTrafficMonitorEnabled()
+  } catch (_) {
+    trafficMonitorEnabled.value = true
   }
   await loadConfigLocation()
 })
@@ -222,6 +231,16 @@ async function onAutoRunChange(checked) {
   }
 }
 
+async function onTrafficMonitorChange(checked) {
+  try {
+    await SetTrafficMonitorEnabled(!!checked)
+    trafficMonitorEnabled.value = !!checked
+    emit('traffic-monitor-change', !!checked)
+  } catch (_) {
+    trafficMonitorEnabled.value = !checked
+  }
+}
+
 async function onExportConfig() {
   configBusy.value = 'export'
   try {
@@ -337,6 +356,22 @@ watch(locale, async (newLocale) => {
                 type="checkbox"
                 :checked="autoRunEnabled"
                 @change="onAutoRunChange($event.target.checked)"
+              />
+            </div>
+          </div>
+
+          <div class="config-row">
+            <div>
+              <div class="config-name">{{ t('config.trafficMonitor') }}</div>
+              <div class="config-desc">{{ t('config.trafficMonitorDesc') }}</div>
+            </div>
+            <div class="form-check form-switch m-0">
+              <input
+                id="trafficMonitorSwitch"
+                class="form-check-input"
+                type="checkbox"
+                :checked="trafficMonitorEnabled"
+                @change="onTrafficMonitorChange($event.target.checked)"
               />
             </div>
           </div>

@@ -15,7 +15,10 @@
             "configSubtitle": "主題、版本、更新與產品入口",
             "upgrade": "升級",
             "collapse": "收合側邊欄",
-            "expand": "展開側邊欄"
+            "expand": "展開側邊欄",
+            "traffic": "即時流量",
+            "upload": "上傳",
+            "download": "下載"
         },
         "header": {
             "newJumper": "+ 新建跳板機",
@@ -342,6 +345,8 @@
         "autoRunDesc": "登入時自動啟動 Loris Tunnel（僅 Pro）",
         "autoRunProRequired": "隨系統啟動為 Pro 功能，請升級後使用。",
         "autoRunExpiredDisabled": "您已開啟隨系統啟動，但目前未升級或授權已過期，已為您關閉該功能。請升級後重新開啟。",
+        "trafficMonitor": "即時流量監控",
+        "trafficMonitorDesc": "在側欄顯示隧道上下行速率與流量曲線",
         "appInfo": "應用程式資訊",
         "version": "版本",
         "productUpdates": "產品更新",

@@ -366,6 +366,24 @@ func (b *TunnelBiz) attachRuntimeLatencies(items []model.Tunnel) {
 	}
 }
 
+func (b *TunnelBiz) TrafficSnapshot() (up, down uint64) {
+	b.mu.Lock()
+	runs := make([]*forward.LocalForward, 0, len(b.runs))
+	for _, run := range b.runs {
+		if run != nil {
+			runs = append(runs, run)
+		}
+	}
+	b.mu.Unlock()
+
+	for _, run := range runs {
+		runUp, runDown := run.Traffic()
+		up += runUp
+		down += runDown
+	}
+	return up, down
+}
+
 // StartAutoStart starts tunnels marked autoStart. maxRunning <= 0 means unlimited
 // (Pro); otherwise only the first maxRunning auto-start tunnels are started.
 func (b *TunnelBiz) StartAutoStart(maxRunning int) error {

@@ -52,8 +52,9 @@ type Config struct {
 	Jumpers []model.Jumper      `toml:"jumpers"`
 	Groups  []model.TunnelGroup `toml:"groups"`
 	Tunnels []model.Tunnel      `toml:"tunnels"`
-	AutoRun bool                `toml:"auto_run"`
-	License LicenseConfig       `toml:"license"`
+	AutoRun                 bool `toml:"auto_run"`
+	TrafficMonitorEnabled   bool `toml:"traffic_monitor_enabled"`
+	License                 LicenseConfig       `toml:"license"`
 }
 
 type LicenseConfig struct {
@@ -83,8 +84,9 @@ func DefaultConfig() *Config {
 		Jumpers: []model.Jumper{},
 		Groups:  []model.TunnelGroup{},
 		Tunnels: []model.Tunnel{},
-		AutoRun: false,
-		License: LicenseConfig{},
+		AutoRun:               false,
+		TrafficMonitorEnabled: true,
+		License:               LicenseConfig{},
 	}
 }
 
@@ -94,7 +96,12 @@ func (c *Config) Clone() *Config {
 		return DefaultConfig()
 	}
 
-	out := &Config{Version: c.Version, AutoRun: c.AutoRun, License: c.License}
+	out := &Config{
+		Version:               c.Version,
+		AutoRun:               c.AutoRun,
+		TrafficMonitorEnabled: c.TrafficMonitorEnabled,
+		License:               c.License,
+	}
 	out.Jumpers = append(out.Jumpers, c.Jumpers...)
 	out.Groups = append(out.Groups, c.Groups...)
 	out.Tunnels = append(out.Tunnels, c.Tunnels...)

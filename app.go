@@ -69,6 +69,11 @@ type App struct {
 
 	usageReporterStop chan struct{}
 	usageReporterWG   sync.WaitGroup
+
+	trafficMu         sync.Mutex
+	lastTrafficUp     uint64
+	lastTrafficDown   uint64
+	lastTrafficAt     time.Time
 }
 
 // NewApp creates a new App application struct
@@ -353,6 +358,42 @@ func (a *App) GetState() (model.State, error) {
 		Jumpers: append([]model.Jumper{}, jumpers...),
 		Groups:  append([]model.TunnelGroup{}, groups...),
 		Tunnels: append([]model.Tunnel{}, tunnels...),
+	}, nil
+}
+
+func (a *App) GetTrafficStats() (model.TrafficStats, error) {
+	if err := a.ensureReady(); err != nil {
+		return model.TrafficStats{}, err
+	}
+
+	up, down := a.tunnel.TrafficSnapshot()
+	now := time.Now()
+
+	a.trafficMu.Lock()
+	defer a.trafficMu.Unlock()
+
+	var upBps, downBps int64
+	if !a.lastTrafficAt.IsZero() {
+		elapsed := now.Sub(a.lastTrafficAt).Seconds()
+		if elapsed > 0 {
+			upBps = int64(float64(up-a.lastTrafficUp) / elapsed)
+			downBps = int64(float64(down-a.lastTrafficDown) / elapsed)
+			if upBps < 0 {
+				upBps = 0
+			}
+			if downBps < 0 {
+				downBps = 0
+			}
+		}
+	}
+
+	a.lastTrafficUp = up
+	a.lastTrafficDown = down
+	a.lastTrafficAt = now
+
+	return model.TrafficStats{
+		UpBps:   upBps,
+		DownBps: downBps,
 	}, nil
 }
 
@@ -811,6 +852,28 @@ func (a *App) SetAutoRunEnabled(enabled bool) error {
 		return autostart.Enable()
 	}
 	return autostart.Disable()
+}
+
+func (a *App) GetTrafficMonitorEnabled() (bool, error) {
+	if err := a.ensureReady(); err != nil {
+		return true, err
+	}
+	cfg, err := a.storage.Load()
+	if err != nil {
+		return true, err
+	}
+	return cfg.TrafficMonitorEnabled, nil
+}
+
+func (a *App) SetTrafficMonitorEnabled(enabled bool) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	_, err := a.storage.Update(func(cfg *conf.Config) error {
+		cfg.TrafficMonitorEnabled = enabled
+		return nil
+	})
+	return err
 }
 
 // GetConfigPath returns the absolute path of the current config file.

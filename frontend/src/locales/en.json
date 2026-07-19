@@ -15,7 +15,10 @@
             "configSubtitle": "Theme, version, updates and product entry",
             "upgrade": "Upgrade",
             "collapse": "Collapse sidebar",
-            "expand": "Expand sidebar"
+            "expand": "Expand sidebar",
+            "traffic": "Live traffic",
+            "upload": "Upload",
+            "download": "Download"
         },
         "header": {
             "newJumper": "+ New Jumper",
@@ -351,6 +354,8 @@
         "autoRunDesc": "Start Loris Tunnel when you log in (Pro only)",
         "autoRunProRequired": "Launch at login is a Pro feature. Please upgrade to enable.",
         "autoRunExpiredDisabled": "Launch at login was enabled but your license has expired or is inactive. It has been disabled. Upgrade to re-enable.",
+        "trafficMonitor": "Live traffic monitor",
+        "trafficMonitorDesc": "Show upload/download rates and sparkline in the sidebar",
         "appInfo": "App Info",
         "version": "Version",
         "productUpdates": "Product Updates",
