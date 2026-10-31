@@ -44,7 +44,7 @@ function greet() {
 }
 
 .input-box .btn:hover {
-  background-image: linear-gradient(to top, #cfd9df 0%, #e2ebf0 100%);
+  background-color: #eef0ed;
   color: #333333;
 }
 

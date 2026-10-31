@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
     "bootstrap": "^5.3.8",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^3.0.3",
+    "playwright": "1.62.1",
     "vite": "^3.0.7"
   }
 }

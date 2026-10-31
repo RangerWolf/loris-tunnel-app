@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	devBackendAPIBaseURL  = "http://localhost:8000/api/v1"
+	devBackendAPIBaseURL  = "http://127.0.0.1:8000/api/v1"
 	prodBackendAPIBaseURL = "https://loris-tunnel-prod.flyml.net/api/v1"
 	requestTimeout        = 10 * time.Second
 )
@@ -53,6 +53,13 @@ func (c *Client) BaseURL() string {
 		return ""
 	}
 	return c.baseURL
+}
+
+func (c *Client) Environment() string {
+	if c.BaseURL() == devBackendAPIBaseURL {
+		return "dev"
+	}
+	return "prod"
 }
 
 func resolveBaseURLByBuildType(buildType string) string {

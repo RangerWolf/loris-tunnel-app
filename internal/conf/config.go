@@ -48,13 +48,15 @@ func getDefaultConfigDir() string {
 
 // Config is persisted in TOML storage.
 type Config struct {
-	Version int                 `toml:"version"`
-	Jumpers []model.Jumper      `toml:"jumpers"`
-	Groups  []model.TunnelGroup `toml:"groups"`
-	Tunnels []model.Tunnel      `toml:"tunnels"`
-	AutoRun                 bool `toml:"auto_run"`
-	TrafficMonitorEnabled   bool `toml:"traffic_monitor_enabled"`
-	License                 LicenseConfig       `toml:"license"`
+	SyncBaseline          SyncBaseline            `toml:"sync_baseline,omitempty"`
+	SyncBaselines         map[string]SyncBaseline `toml:"sync_baselines,omitempty"`
+	Version               int                     `toml:"version"`
+	Jumpers               []model.Jumper          `toml:"jumpers"`
+	Groups                []model.TunnelGroup     `toml:"groups"`
+	Tunnels               []model.Tunnel          `toml:"tunnels"`
+	AutoRun               bool                    `toml:"auto_run"`
+	TrafficMonitorEnabled bool                    `toml:"traffic_monitor_enabled"`
+	License               LicenseConfig           `toml:"license"`
 }
 
 type LicenseConfig struct {
@@ -80,10 +82,10 @@ func ResolveConfigPath() string {
 // DefaultConfig creates an empty config.
 func DefaultConfig() *Config {
 	return &Config{
-		Version: currentConfigVersion,
-		Jumpers: []model.Jumper{},
-		Groups:  []model.TunnelGroup{},
-		Tunnels: []model.Tunnel{},
+		Version:               currentConfigVersion,
+		Jumpers:               []model.Jumper{},
+		Groups:                []model.TunnelGroup{},
+		Tunnels:               []model.Tunnel{},
 		AutoRun:               false,
 		TrafficMonitorEnabled: true,
 		License:               LicenseConfig{},
@@ -101,10 +103,32 @@ func (c *Config) Clone() *Config {
 		AutoRun:               c.AutoRun,
 		TrafficMonitorEnabled: c.TrafficMonitorEnabled,
 		License:               c.License,
+		SyncBaseline:          c.SyncBaseline,
+	}
+	if c.SyncBaselines != nil {
+		out.SyncBaselines = make(map[string]SyncBaseline, len(c.SyncBaselines))
+		for environment, baseline := range c.SyncBaselines {
+			out.SyncBaselines[environment] = baseline
+		}
 	}
 	out.Jumpers = append(out.Jumpers, c.Jumpers...)
 	out.Groups = append(out.Groups, c.Groups...)
 	out.Tunnels = append(out.Tunnels, c.Tunnels...)
+	for i := range out.Tunnels {
+		out.Tunnels[i].JumperIDs = append([]int{}, c.Tunnels[i].JumperIDs...)
+		if c.Tunnels[i].FRP != nil {
+			copied := *c.Tunnels[i].FRP
+			out.Tunnels[i].FRP = &copied
+		}
+		if c.Tunnels[i].DevTunnel != nil {
+			copied := *c.Tunnels[i].DevTunnel
+			out.Tunnels[i].DevTunnel = &copied
+		}
+		if c.Tunnels[i].Cloudflare != nil {
+			copied := *c.Tunnels[i].Cloudflare
+			out.Tunnels[i].Cloudflare = &copied
+		}
+	}
 	return out
 }
 
@@ -146,4 +170,21 @@ func normalizeJumperIDs(ids []int) []int {
 		appendID(id)
 	}
 	return out
+}
+
+// SyncBaseline commits the applied snapshot and its revision in the same atomic file.
+// ExportConfig deliberately excludes this machine-local metadata.
+type SyncBaseline struct {
+	SpaceID     string `toml:"space_id"`
+	ServerURL   string `toml:"server_url"`
+	Revision    int64  `toml:"revision"`
+	Fingerprint string `toml:"fingerprint"`
+	SyncedAt    string `toml:"synced_at"`
+}
+
+func (c *Config) SetSyncBaseline(environment string, baseline SyncBaseline) {
+	if c.SyncBaselines == nil {
+		c.SyncBaselines = make(map[string]SyncBaseline)
+	}
+	c.SyncBaselines[environment] = baseline
 }

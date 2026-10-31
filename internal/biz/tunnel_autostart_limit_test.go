@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"loris-tunnel/internal/conf"
+	"loris-tunnel/internal/forward"
 	"loris-tunnel/internal/model"
 )
 
@@ -66,7 +67,7 @@ func countAttemptedAutoStart(t *testing.T, tunnelBiz *TunnelBiz) int {
 
 func TestStartAutoStartRespectsFreePlanLimit(t *testing.T) {
 	tunnelBiz := createAutoStartTunnels(t, 5)
-	_ = tunnelBiz.StartAutoStart(FreePlanRunningLimit)
+	_ = startAutoStartAndWait(tunnelBiz, FreePlanRunningLimit)
 
 	attempted := countAttemptedAutoStart(t, tunnelBiz)
 	if attempted != FreePlanRunningLimit {
@@ -74,13 +75,54 @@ func TestStartAutoStartRespectsFreePlanLimit(t *testing.T) {
 	}
 }
 
-func TestStartAutoStartUnlimitedWhenMaxRunningZero(t *testing.T) {
+func TestStartAutoStartAllowsUnlimitedWhenMaxRunningZero(t *testing.T) {
 	tunnelBiz := createAutoStartTunnels(t, 5)
-	_ = tunnelBiz.StartAutoStart(0)
+	_ = startAutoStartAndWait(tunnelBiz, 0)
 
 	attempted := countAttemptedAutoStart(t, tunnelBiz)
 	if attempted != 5 {
-		t.Fatalf("expected all 5 auto-start attempts when unlimited, got %d", attempted)
+		t.Fatalf("expected all 5 Pro auto-start attempts, got %d", attempted)
+	}
+}
+
+func TestStartAutoStartClearsSkippedRuntimeStates(t *testing.T) {
+	b := createAutoStartTunnels(t, 6)
+	_, err := b.storage.Update(func(cfg *conf.Config) error {
+		for i := range cfg.Tunnels {
+			cfg.Tunnels[i].Status = "running"
+		}
+		cfg.Tunnels[4].Status = "busy"
+		cfg.Tunnels[5].AutoStart = false
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := startAutoStartAndWait(b, FreePlanRunningLimit); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := b.storage.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tunnel := range cfg.Tunnels[FreePlanRunningLimit:] {
+		if tunnel.Status != "stopped" {
+			t.Fatalf("skipped tunnel %s has stale status %s", tunnel.Name, tunnel.Status)
+		}
+	}
+}
+
+func TestListDoesNotReportPersistedRunningWithoutRuntime(t *testing.T) {
+	b := createAutoStartTunnels(t, 1)
+	if _, err := b.updateStatus(1, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+	items, err := b.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items[0].Status != "stopped" || items[0].LatencyMs != 0 {
+		t.Fatalf("no runtime should report stopped without latency: %+v", items[0])
 	}
 }
 
@@ -98,8 +140,63 @@ func TestToggleEnforcesFreePlanLimit(t *testing.T) {
 	}
 	targetID := cfg.Tunnels[0].ID
 
-	_, err = tunnelBiz.Toggle(targetID, FreePlanRunningLimit)
+	calls := 0
+	_, err = tunnelBiz.Toggle(targetID, func() int {
+		calls++
+		return FreePlanRunningLimit
+	})
 	if !errors.Is(err, ErrFreePlanRunningLimit) {
 		t.Fatalf("expected ErrFreePlanRunningLimit, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one license check when starting, got %d", calls)
+	}
+}
+
+func TestToggleStopSkipsLicenseCheck(t *testing.T) {
+	tunnelBiz := createAutoStartTunnels(t, 1)
+	cfg, err := tunnelBiz.storage.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := cfg.Tunnels[0].ID
+	if _, err := tunnelBiz.updateStatus(id, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+	tunnelBiz.runs[id] = forward.NewLocalForward(model.Tunnel{ID: id}, nil)
+	updated, err := tunnelBiz.Toggle(id, func() int {
+		t.Fatal("stopping must not query the license service")
+		return FreePlanRunningLimit
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "stopped" {
+		t.Fatalf("expected stopped, got %s", updated.Status)
+	}
+}
+
+func startAutoStartAndWait(b *TunnelBiz, limit int) error {
+	err := b.StartAutoStart(limit)
+	b.startWG.Wait()
+	return err
+}
+
+func TestToggleProCanStartBeyondThree(t *testing.T) {
+	b := createAutoStartTunnels(t, 1)
+	cfg, err := b.storage.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id := 100; id < 103; id++ {
+		b.runs[id] = forward.NewLocalForward(model.Tunnel{ID: id}, nil)
+	}
+	result, err := b.Toggle(cfg.Tunnels[0].ID, func() int { return 0 })
+	b.startWG.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "busy" {
+		t.Fatalf("expected accepted async start, got %s", result.Status)
 	}
 }

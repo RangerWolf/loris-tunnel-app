@@ -1,0 +1,33 @@
+# Import this file via Import Tunnel > FRPC Config > Choose file.
+# Replace the server address and token before connecting.
+serverAddr = "frp.example.com"
+serverPort = 7000
+
+auth.method = "token"
+auth.token = "replace-with-your-frps-token"
+transport.tls.enable = true
+
+# Forward a local web service to port 18080 on the FRP server.
+[[proxies]]
+name = "sample-web"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8080
+remotePort = 18080
+
+# Forward local SSH to port 16022 on the FRP server.
+[[proxies]]
+name = "sample-ssh"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 16022
+
+# Route HTTP requests for this domain to a local web service.
+# Point the domain to your FRP server and enable vhostHTTPPort on frps.
+[[proxies]]
+name = "sample-http"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 8080
+customDomains = ["web.example.com"]

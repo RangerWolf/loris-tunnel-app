@@ -5,6 +5,8 @@ import 'bootstrap/dist/css/bootstrap.min.css'
 import 'bootstrap/dist/js/bootstrap.bundle.min.js'
 import 'bootstrap-icons/font/bootstrap-icons.css'
 import './style.css';
+import './styles/theme-overrides.css'
+import './styles/theme.css'
 import { LogError } from '../wailsjs/runtime/runtime'
 
 // Safety net: without this, an uncaught error during render/reactivity (e.g. an

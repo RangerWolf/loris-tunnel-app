@@ -28,7 +28,7 @@ var ErrUnsupportedMode = errors.New("only local, remote and dynamic modes are su
 const (
 	initReconnectWait = 500 * time.Millisecond
 	maxReconnectWait  = 1 * time.Minute
-	reconnectTimeout  = 15 * time.Minute
+	reconnectTimeout  = 2 * time.Hour
 )
 
 var (

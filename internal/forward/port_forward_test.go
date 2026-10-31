@@ -22,8 +22,8 @@ func TestReconnectPolicyConstants(t *testing.T) {
 	if maxReconnectWait != time.Minute {
 		t.Fatalf("maxReconnectWait = %v, want %v", maxReconnectWait, time.Minute)
 	}
-	if reconnectTimeout != 15*time.Minute {
-		t.Fatalf("reconnectTimeout = %v, want %v", reconnectTimeout, 15*time.Minute)
+	if reconnectTimeout != 2*time.Hour {
+		t.Fatalf("reconnectTimeout = %v, want %v", reconnectTimeout, 2*time.Hour)
 	}
 }
 

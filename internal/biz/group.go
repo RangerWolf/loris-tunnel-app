@@ -85,8 +85,9 @@ func (b *GroupBiz) Update(id int, payload model.TunnelGroupPayload) (model.Tunne
 		}
 
 		updated = model.TunnelGroup{
-			ID:   id,
-			Name: payload.Name,
+			SyncID: cfg.Groups[idx].SyncID,
+			ID:     id,
+			Name:   payload.Name,
 		}
 		cfg.Groups[idx] = updated
 		return nil

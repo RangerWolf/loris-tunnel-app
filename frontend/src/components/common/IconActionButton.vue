@@ -25,7 +25,13 @@ const props = defineProps({
   }
 })
 
-defineEmits(['click'])
+const emit = defineEmits(['click'])
+
+function onClick(event) {
+  event.currentTarget?.blur()
+  tooltipInstance?.hide()
+  emit('click', event)
+}
 
 const btnRef = ref(null)
 let tooltipInstance = null
@@ -33,7 +39,7 @@ let tooltipInstance = null
 onMounted(() => {
   if (btnRef.value) {
     tooltipInstance = new Tooltip(btnRef.value, {
-      trigger: 'hover'
+      trigger: 'hover focus'
     })
   }
 })
@@ -64,7 +70,7 @@ watch(() => props.title, (newTitle) => {
     :data-bs-title="title"
     :aria-label="ariaLabel"
     :disabled="disabled"
-    @click="$emit('click')"
+    @click="onClick"
   >
     <i class="bi action-icon" :class="iconClass" />
   </button>

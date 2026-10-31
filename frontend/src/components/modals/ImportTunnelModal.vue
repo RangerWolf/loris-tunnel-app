@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, reactive, watch } from 'vue'
+import FRPCImportPanel from './FRPCImportPanel.vue'
 
 const props = defineProps({
   show: {
@@ -32,7 +33,9 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'import'])
+const emit = defineEmits(['close', 'import', 'frpc-imported'])
+const frpcBusy = ref(false)
+const frpcPanel = ref(null)
 
 const sshCommand = ref('')
 const parseError = ref('')
@@ -52,7 +55,8 @@ const importJumperValidationError = ref('')
 const importJumperForm = reactive(defaultImportJumperForm())
 
 const sourceOptions = [
-  { value: 'ssh', label: 'SSH Command' }
+  { value: 'ssh', label: 'SSH Command' },
+  { value: 'frpc', label: 'FRPC Config' }
 ]
 
 function defaultImportJumperForm() {
@@ -655,6 +659,7 @@ function resetFormState() {
 }
 
 function handleClose() {
+  if (frpcBusy.value) return
   resetFormState()
   emit('close')
 }
@@ -695,21 +700,23 @@ watch(
       <div class="dialog-body">
         <div class="mb-2">
           <label class="form-label">{{ $t('app.modals.importTunnel.source') }}</label>
-          <select v-model="selectedSource" class="form-select">
+          <select v-model="selectedSource" class="form-select" :disabled="frpcBusy">
             <option v-for="option in sourceOptions" :key="option.value" :value="option.value">
               {{ option.label }}
             </option>
           </select>
         </div>
 
-        <div v-if="selectedSource === 'ssh'" class="mb-2">
+        <FRPCImportPanel v-show="selectedSource === 'frpc'" ref="frpcPanel" :existing-tunnels="existingTunnels" @busy="frpcBusy = $event" @imported="emit('frpc-imported')" @complete="handleClose" />
+        <template v-if="selectedSource === 'ssh'">
+        <div class="mb-2">
           <label class="form-label">{{ $t('app.modals.importTunnel.sshCommand') }}</label>
           <textarea
             v-model="sshCommand"
             class="form-control ssh-command-textarea"
             rows="4"
             :placeholder="$t('app.modals.importTunnel.sshCommandPlaceholder')"
-            autocapitalize="off"
+            autocapitalize="none"
             autocorrect="off"
             spellcheck="false"
           />
@@ -754,7 +761,7 @@ watch(
             </div>
             <div v-else class="col-md-6">
               <label class="form-label">{{ $t('app.modals.jumper.name') }}</label>
-              <input v-model="importJumperForm.name" class="form-control" type="text" :maxlength="jumperLimits.name" required />
+              <input v-model="importJumperForm.name" class="form-control" type="text" :maxlength="jumperLimits.name" autocapitalize="none" autocorrect="off" spellcheck="false" required />
             </div>
           </div>
 
@@ -762,11 +769,11 @@ watch(
             <div class="import-jumper-target-row">
               <div>
               <label class="form-label">{{ $t('app.modals.jumper.user') }}</label>
-              <input v-model="importJumperForm.user" class="form-control" type="text" :maxlength="jumperLimits.user" required />
+              <input v-model="importJumperForm.user" class="form-control" type="text" :maxlength="jumperLimits.user" autocapitalize="none" autocorrect="off" spellcheck="false" required />
               </div>
               <div>
               <label class="form-label">{{ $t('app.modals.jumper.host') }}</label>
-              <input v-model="importJumperForm.host" class="form-control" type="text" :maxlength="jumperLimits.host" required />
+              <input v-model="importJumperForm.host" class="form-control" type="text" :maxlength="jumperLimits.host" autocapitalize="none" autocorrect="off" spellcheck="false" required />
               </div>
               <div>
               <label class="form-label">{{ $t('app.modals.jumper.port') }}</label>
@@ -790,6 +797,9 @@ watch(
                 v-model="importJumperForm.agentSocketPath"
                 class="form-control"
                 type="text"
+                autocapitalize="none"
+                autocorrect="off"
+                spellcheck="false"
                 :maxlength="jumperLimits.agentSocketPath"
                 :placeholder="$t('app.modals.jumper.agentSocketPlaceholder')"
               />
@@ -803,6 +813,9 @@ watch(
                     v-model="importJumperForm.keyPath"
                     class="form-control"
                     type="text"
+                    autocapitalize="none"
+                    autocorrect="off"
+                    spellcheck="false"
                     :maxlength="jumperLimits.keyPath"
                     :placeholder="$t('app.modals.jumper.keyPathPlaceholder')"
                     :required="importJumperNeedsKeyFile"
@@ -859,7 +872,7 @@ watch(
             </div>
             <div class="col-md-12">
               <label class="form-label">{{ $t('app.modals.jumper.notes') }}</label>
-              <textarea v-model="importJumperForm.notes" class="form-control" rows="2" :maxlength="jumperLimits.notes" />
+              <textarea v-model="importJumperForm.notes" class="form-control" rows="2" :maxlength="jumperLimits.notes" autocapitalize="none" autocorrect="off" spellcheck="false" />
             </div>
             <div class="col-md-12">
               <div class="form-check form-switch">
@@ -903,6 +916,9 @@ watch(
                         v-model="tunnel.name"
                         class="form-control form-control-sm"
                         type="text"
+                        autocapitalize="none"
+                        autocorrect="off"
+                        spellcheck="false"
                         :disabled="tunnel.importStatus === 'error'"
                       />
                     </td>
@@ -965,19 +981,30 @@ watch(
             </table>
           </div>
         </div>
+        </template>
       </div>
       <div class="dialog-footer import-dialog-footer">
         <div class="dialog-right-actions">
-          <button type="button" class="btn btn-outline-secondary" @click="handleClose">
+          <button type="button" class="btn btn-outline-secondary" :disabled="frpcBusy" @click="handleClose">
             {{ $t('app.common.cancel') }}
           </button>
             <button
               type="button"
               class="btn btn-primary"
+              v-if="selectedSource === 'ssh'"
               :disabled="!hasSelectableTunnels || !parsedTunnels.some(t => t.selected)"
               @click="handleImport"
             >
               {{ $t('app.modals.importTunnel.importBtn') }}
+          </button>
+          <button
+            v-else
+            type="button"
+            class="btn btn-primary"
+            :disabled="frpcBusy || !frpcPanel?.canImport"
+            @click="frpcPanel?.save()"
+          >
+            {{ $t('app.modals.importTunnel.importBtn') }}
           </button>
         </div>
       </div>
@@ -993,7 +1020,7 @@ watch(
   resize: vertical;
 }
 
-.parse-btn {
+.import-tunnel-dialog :deep(.btn) {
   font-size: 0.8rem;
   padding: 0.375rem 0.75rem;
   min-height: 32px;
@@ -1095,15 +1122,4 @@ watch(
   padding: 0.72rem 0.92rem;
 }
 
-.import-dialog-footer .btn {
-  font-size: 0.8rem;
-  padding: 0.375rem 0.75rem;
-  min-height: 32px;
-}
-
-@media (max-width: 768px) {
-  .parse-btn {
-    width: 100%;
-  }
-}
 </style>

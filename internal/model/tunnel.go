@@ -1,7 +1,18 @@
 package model
 
+import "strings"
+
+const (
+	ProviderFRP        = "frp"
+	ProviderSSH        = "ssh"
+	ProviderDevTunnel  = "devtunnel"
+	ProviderCloudflare = "cloudflare"
+)
+
 // Jumper is the SSH jumper configuration used by the frontend.
 type Jumper struct {
+	NeedsCredentials       bool   `json:"needsCredentials,omitempty" toml:"needs_credentials,omitempty"`
+	SyncID                 string `json:"syncId,omitempty" toml:"sync_id,omitempty"`
 	ID                     int    `json:"id" toml:"id"`
 	Name                   string `json:"name" toml:"name"`
 	Host                   string `json:"host" toml:"host"`
@@ -20,33 +31,93 @@ type Jumper struct {
 
 // TunnelGroup is a user-defined collection for organizing tunnels.
 type TunnelGroup struct {
-	ID   int    `json:"id" toml:"id"`
-	Name string `json:"name" toml:"name"`
+	SyncID string `json:"syncId,omitempty" toml:"sync_id,omitempty"`
+	ID     int    `json:"id" toml:"id"`
+	Name   string `json:"name" toml:"name"`
 }
 
-// Tunnel is the SSH tunnel configuration used by the frontend.
+// DevTunnelConfig is the persisted Microsoft Dev Tunnel setup.
+// Login tokens stay in the CLI credential store and are not written here.
+// LastPublicURL caches the last successful host result.
+// PublicURL is a live host result and is intentionally excluded from TOML.
+type DevTunnelConfig struct {
+	TunnelPort    int    `json:"tunnelPort,omitempty" toml:"tunnel_port,omitempty"`
+	LastPublicURL string `json:"lastPublicUrl,omitempty" toml:"last_public_url,omitempty"`
+	TunnelID      string `json:"tunnelId" toml:"tunnel_id"`
+	LocalHost     string `json:"localHost" toml:"local_host"`
+	LocalPort     int    `json:"localPort" toml:"local_port"`
+	Protocol      string `json:"protocol" toml:"protocol"`
+	Access        string `json:"access" toml:"access"`
+	Expiration    string `json:"expiration,omitempty" toml:"expiration,omitempty"`
+	Region        string `json:"region,omitempty" toml:"region,omitempty"`
+	Account       string `json:"account,omitempty" toml:"account,omitempty"`
+}
+
+// CloudflareTunnelConfig is one locally-managed named tunnel.
+// Credentials stay in ~/.cloudflared and are not written here.
+type CloudflareTunnelConfig struct {
+	TunnelID   string `json:"tunnelId" toml:"tunnel_id"`
+	TunnelName string `json:"tunnelName,omitempty" toml:"tunnel_name,omitempty"`
+	LocalHost  string `json:"localHost" toml:"local_host"`
+	LocalPort  int    `json:"localPort" toml:"local_port"`
+	Protocol   string `json:"protocol" toml:"protocol"`
+	Hostname   string `json:"hostname" toml:"hostname"`
+}
+
+type FRPTunnelConfig struct {
+	ServerID   string `json:"serverId" toml:"server_id"`
+	ProxyName  string `json:"proxyName" toml:"proxy_name"`
+	RemotePort int    `json:"remotePort" toml:"remote_port"`
+	Domain     string `json:"domain" toml:"domain"`
+}
+
+// Tunnel is a persisted connection. Empty Provider means an older SSH config.
 type Tunnel struct {
-	ID          int    `json:"id" toml:"id"`
-	Name        string `json:"name" toml:"name"`
-	GroupID     int    `json:"groupId" toml:"group_id"`
-	Mode        string `json:"mode" toml:"mode"`
-	JumperIDs   []int  `json:"jumperIds" toml:"jumper_ids"`
-	LocalHost   string `json:"localHost" toml:"local_host"`
-	LocalPort   int    `json:"localPort" toml:"local_port"`
-	RemoteHost  string `json:"remoteHost" toml:"remote_host"`
-	RemotePort  int    `json:"remotePort" toml:"remote_port"`
-	AutoStart   bool   `json:"autoStart" toml:"auto_start"`
-	Status      string `json:"status" toml:"status"`
-	LastError   string `json:"lastError" toml:"last_error"`
-	Description string `json:"description" toml:"description"`
-	LatencyMs   int64  `json:"latencyMs,omitempty" toml:"-"`
+	FRP               *FRPTunnelConfig        `json:"frp,omitempty" toml:"frp,omitempty"`
+	OriginState       string                  `json:"originState,omitempty" toml:"-"`
+	LatencyState      string                  `json:"latencyState,omitempty" toml:"-"`
+	LatencyCheckedAt  string                  `json:"latencyCheckedAt,omitempty" toml:"-"`
+	LatencyHTTPStatus int                     `json:"latencyHttpStatus,omitempty" toml:"-"`
+	LatencyDetail     string                  `json:"latencyDetail,omitempty" toml:"-"`
+	SyncID            string                  `json:"syncId,omitempty" toml:"sync_id,omitempty"`
+	ID                int                     `json:"id" toml:"id"`
+	Name              string                  `json:"name" toml:"name"`
+	Provider          string                  `json:"provider,omitempty" toml:"provider,omitempty"`
+	GroupID           int                     `json:"groupId" toml:"group_id"`
+	Mode              string                  `json:"mode" toml:"mode"`
+	JumperIDs         []int                   `json:"jumperIds" toml:"jumper_ids"`
+	LocalHost         string                  `json:"localHost" toml:"local_host"`
+	LocalPort         int                     `json:"localPort" toml:"local_port"`
+	RemoteHost        string                  `json:"remoteHost" toml:"remote_host"`
+	RemotePort        int                     `json:"remotePort" toml:"remote_port"`
+	AutoStart         bool                    `json:"autoStart" toml:"auto_start"`
+	ManuallyStopped   bool                    `json:"manuallyStopped" toml:"manually_stopped"`
+	Status            string                  `json:"status" toml:"status"`
+	LastError         string                  `json:"lastError" toml:"last_error"`
+	Description       string                  `json:"description" toml:"description"`
+	DevTunnel         *DevTunnelConfig        `json:"devTunnel,omitempty" toml:"dev_tunnel,omitempty"`
+	Cloudflare        *CloudflareTunnelConfig `json:"cloudflare,omitempty" toml:"cloudflare,omitempty"`
+	LatencyMs         int64                   `json:"latencyMs,omitempty" toml:"-"`
+	PublicURL         string                  `json:"publicUrl,omitempty" toml:"-"`
+}
+
+// ProviderName treats a missing provider as SSH so historical configs keep working.
+func (t Tunnel) ProviderName() string {
+	switch strings.TrimSpace(t.Provider) {
+	case "", ProviderSSH:
+		return ProviderSSH
+	default:
+		return strings.TrimSpace(t.Provider)
+	}
 }
 
 // State is the full frontend state stored in config.
 type State struct {
-	Jumpers []Jumper      `json:"jumpers"`
-	Groups  []TunnelGroup `json:"groups"`
-	Tunnels []Tunnel      `json:"tunnels"`
+	Jumpers         []Jumper      `json:"jumpers"`
+	Groups          []TunnelGroup `json:"groups"`
+	Tunnels         []Tunnel      `json:"tunnels"`
+	ActiveSlots     int           `json:"activeSlots"`
+	ActiveSlotLimit int           `json:"activeSlotLimit"`
 }
 
 // TunnelGroupPayload is used by create/update group APIs.
@@ -73,17 +144,23 @@ type JumperPayload struct {
 
 // TunnelPayload is used by create/update APIs.
 type TunnelPayload struct {
-	Name        string `json:"name"`
-	GroupID     int    `json:"groupId"`
-	Mode        string `json:"mode"`
-	JumperIDs   []int  `json:"jumperIds"`
-	LocalHost   string `json:"localHost"`
-	LocalPort   int    `json:"localPort"`
-	RemoteHost  string `json:"remoteHost"`
-	RemotePort  int    `json:"remotePort"`
-	AutoStart   bool   `json:"autoStart"`
-	Status      string `json:"status"`
-	Description string `json:"description"`
+	FRP              *FRPTunnelConfig        `json:"frp,omitempty"`
+	Name             string                  `json:"name"`
+	Provider         string                  `json:"provider"`
+	GroupID          int                     `json:"groupId"`
+	Mode             string                  `json:"mode"`
+	JumperIDs        []int                   `json:"jumperIds"`
+	LocalHost        string                  `json:"localHost"`
+	LocalPort        int                     `json:"localPort"`
+	RemoteHost       string                  `json:"remoteHost"`
+	RemotePort       int                     `json:"remotePort"`
+	AutoStart        bool                    `json:"autoStart"`
+	Status           string                  `json:"status"`
+	Description      string                  `json:"description"`
+	DevTunnel        *DevTunnelConfig        `json:"devTunnel"`
+	DevTunnelIDMode  string                  `json:"devTunnelIdMode,omitempty"`
+	Cloudflare       *CloudflareTunnelConfig `json:"cloudflare,omitempty"`
+	CloudflareIDMode string                  `json:"cloudflareIdMode,omitempty"`
 }
 
 // TunnelConnectionTestResult is returned by TestTunnelConnection API.

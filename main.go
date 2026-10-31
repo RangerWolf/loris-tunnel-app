@@ -2,9 +2,14 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+
+	"loris-tunnel/internal/traytext"
+	"loris-tunnel/internal/uilocale"
 
 	"github.com/energye/systray"
 	"github.com/wailsapp/wails/v2"
@@ -12,8 +17,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	"loris-tunnel/internal/traytext"
-	"loris-tunnel/internal/uilocale"
 )
 
 //go:embed all:frontend/dist
@@ -26,11 +29,30 @@ var distributionChannel = "github"
 //go:embed build/windows/icon.ico
 var trayIconWindows []byte
 
-//go:embed build/macos-systray.png
+//go:embed build/macos-systray-cutout-4.2.png
 var trayIconMacOS []byte
 
 //go:embed build/appicon.png
 var trayIconFallback []byte
+
+//go:embed wails.json
+var wailsConfigJSON []byte
+
+var productVersion = parseProductVersion(wailsConfigJSON)
+
+func parseProductVersion(data []byte) string {
+	var cfg struct {
+		Info struct {
+			ProductVersion string `json:"productVersion"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(data, &cfg); err == nil {
+		if v := strings.TrimSpace(cfg.Info.ProductVersion); v != "" {
+			return v
+		}
+	}
+	return "unknown"
+}
 
 func main() {
 	// Create an instance of the app structure

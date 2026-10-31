@@ -97,6 +97,7 @@ func (b *JumperBiz) Update(id int, payload model.JumperPayload) (model.Jumper, e
 		}
 
 		updated = model.Jumper{
+			SyncID:                 cfg.Jumpers[idx].SyncID,
 			ID:                     id,
 			Name:                   payload.Name,
 			Host:                   payload.Host,

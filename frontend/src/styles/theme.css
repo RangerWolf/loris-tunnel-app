@@ -1,0 +1,215 @@
+/*
+ * Loris Tunnel accent palette. Blue is the default; green is optional.
+ * All primary actions, outlines, focus rings, selections and navigation accents
+ * consume the shared brand tokens. Semantic status/traffic colors stay separate.
+ */
+:root {
+  --lt-brand-ink: #1b6be0;
+  --lt-brand-ink-rgb: 27, 107, 224;
+  --lt-brand-fill: #1b6be0;
+  --lt-brand-fill-rgb: 27, 107, 224;
+  --lt-brand-hover: #165bc2;
+  --lt-brand-active: #124b9f;
+  --lt-brand-on: #ffffff;
+  --lt-brand-link-hover: #124b9f;
+  --lt-brand-link-hover-rgb: 18, 75, 159;
+  --lt-brand-soft: #e4efff;
+  --lt-brand-soft-hover: #edf4ff;
+  --lt-brand-soft-border: #c7dbfe;
+  --lt-brand-focus-ring: rgba(27, 107, 224, 0.2);
+
+  /* Existing application tokens */
+  --lt-accent-ink: var(--lt-brand-ink);
+  --lt-accent-active: var(--lt-brand-soft);
+  --lt-accent-hover: var(--lt-brand-soft-hover);
+  --lt-accent-border: var(--lt-brand-soft-border);
+  --lt-input-focus-border: var(--lt-brand-ink);
+  --lt-input-focus-ring: var(--lt-brand-focus-ring);
+
+  /* Bootstrap utility, link and component tokens */
+  --bs-primary: var(--lt-brand-ink);
+  --bs-primary-rgb: var(--lt-brand-ink-rgb);
+  --bs-primary-text-emphasis: var(--lt-brand-ink);
+  --bs-primary-bg-subtle: var(--lt-brand-soft);
+  --bs-primary-border-subtle: var(--lt-brand-soft-border);
+  --bs-link-color: var(--lt-brand-ink);
+  --bs-link-color-rgb: var(--lt-brand-ink-rgb);
+  --bs-link-hover-color: var(--lt-brand-link-hover);
+  --bs-link-hover-color-rgb: var(--lt-brand-link-hover-rgb);
+  --bs-focus-ring-color: var(--lt-brand-focus-ring);
+}
+
+:root[data-theme="dark"] {
+  --lt-brand-ink: #5a9fff;
+  --lt-brand-ink-rgb: 90, 159, 255;
+  /* Keep filled actions dark enough for white button labels. */
+  --lt-brand-fill: #1b6be0;
+  --lt-brand-fill-rgb: 27, 107, 224;
+  --lt-brand-hover: #165bc2;
+  --lt-brand-active: #124b9f;
+  --lt-brand-on: #ffffff;
+  --lt-brand-link-hover: #8dbfff;
+  --lt-brand-link-hover-rgb: 141, 191, 255;
+  --lt-brand-soft: #243a55;
+  --lt-brand-soft-hover: #1e2f45;
+  --lt-brand-soft-border: #365576;
+  --lt-brand-focus-ring: rgba(90, 159, 255, 0.25);
+}
+
+/* Preserve the original loris-101-v1 green palette in both light and dark modes. */
+:root[data-accent="green"] {
+  --lt-brand-ink: #0f766e;
+  --lt-brand-ink-rgb: 15, 118, 110;
+  --lt-brand-fill: #0f766e;
+  --lt-brand-fill-rgb: 15, 118, 110;
+  --lt-brand-hover: #115e59;
+  --lt-brand-active: #134e4a;
+  --lt-brand-on: #ffffff;
+  --lt-brand-link-hover: #115e59;
+  --lt-brand-link-hover-rgb: 17, 94, 89;
+  --lt-brand-soft: #d9efec;
+  --lt-brand-soft-hover: #edf5f2;
+  --lt-brand-soft-border: #9ccfc8;
+  --lt-brand-focus-ring: rgba(15, 118, 110, 0.2);
+}
+
+:root[data-theme="dark"][data-accent="green"] {
+  --lt-brand-ink: #4fd1c5;
+  --lt-brand-ink-rgb: 79, 209, 197;
+  --lt-brand-fill: #0f766e;
+  --lt-brand-fill-rgb: 15, 118, 110;
+  --lt-brand-hover: #0e8b80;
+  --lt-brand-active: #106159;
+  --lt-brand-on: #ffffff;
+  --lt-brand-link-hover: #83e2d9;
+  --lt-brand-link-hover-rgb: 131, 226, 217;
+  --lt-brand-soft: #16403c;
+  --lt-brand-soft-hover: #243934;
+  --lt-brand-soft-border: #286b62;
+  --lt-brand-focus-ring: rgba(79, 209, 197, 0.25);
+}
+
+/* Bootstrap ships literal blue button colors; redefining --bs-primary alone
+ * does not update .btn-primary or .btn-outline-primary. */
+.btn-primary {
+  --bs-btn-color: var(--lt-brand-on);
+  --bs-btn-bg: var(--lt-brand-fill);
+  --bs-btn-border-color: var(--lt-brand-fill);
+  --bs-btn-hover-color: var(--lt-brand-on);
+  --bs-btn-hover-bg: var(--lt-brand-hover);
+  --bs-btn-hover-border-color: var(--lt-brand-hover);
+  --bs-btn-focus-shadow-rgb: var(--lt-brand-fill-rgb);
+  --bs-btn-active-color: var(--lt-brand-on);
+  --bs-btn-active-bg: var(--lt-brand-active);
+  --bs-btn-active-border-color: var(--lt-brand-active);
+  --bs-btn-disabled-color: var(--lt-brand-on);
+  --bs-btn-disabled-bg: var(--lt-brand-fill);
+  --bs-btn-disabled-border-color: var(--lt-brand-fill);
+}
+
+.btn-outline-primary {
+  --bs-btn-color: var(--lt-brand-ink);
+  --bs-btn-border-color: var(--lt-brand-ink);
+  --bs-btn-hover-color: var(--lt-brand-on);
+  --bs-btn-hover-bg: var(--lt-brand-fill);
+  --bs-btn-hover-border-color: var(--lt-brand-fill);
+  --bs-btn-focus-shadow-rgb: var(--lt-brand-fill-rgb);
+  --bs-btn-active-color: var(--lt-brand-on);
+  --bs-btn-active-bg: var(--lt-brand-active);
+  --bs-btn-active-border-color: var(--lt-brand-active);
+  --bs-btn-disabled-color: var(--lt-brand-ink);
+  --bs-btn-disabled-bg: transparent;
+  --bs-btn-disabled-border-color: var(--lt-brand-ink);
+}
+
+.btn-link {
+  --bs-btn-color: var(--lt-brand-ink);
+  --bs-btn-hover-color: var(--lt-brand-link-hover);
+  --bs-btn-active-color: var(--lt-brand-link-hover);
+}
+
+.btn-primary:focus-visible,
+.btn-outline-primary:focus-visible,
+.btn-link:focus-visible {
+  box-shadow: 0 0 0 0.2rem var(--lt-brand-focus-ring);
+}
+
+/* Form controls in page content and in all custom and Bootstrap dialogs. */
+.form-check-input:checked,
+.form-check-input[type="checkbox"]:indeterminate {
+  background-color: var(--lt-brand-fill);
+  border-color: var(--lt-brand-fill);
+}
+
+.form-range::-webkit-slider-thumb { background-color: var(--lt-brand-fill); }
+.form-range::-moz-range-thumb { background-color: var(--lt-brand-fill); }
+.form-range:focus::-webkit-slider-thumb { box-shadow: 0 0 0 0.2rem var(--lt-brand-focus-ring); }
+.form-range:focus::-moz-range-thumb { box-shadow: 0 0 0 0.2rem var(--lt-brand-focus-ring); }
+
+/* Bootstrap stateful widgets used by the tunnel lists and dialogs. */
+.dropdown-menu {
+  --bs-dropdown-link-active-bg: var(--lt-brand-fill);
+  --bs-dropdown-link-active-color: var(--lt-brand-on);
+}
+.list-group {
+  --bs-list-group-active-bg: var(--lt-brand-fill);
+  --bs-list-group-active-border-color: var(--lt-brand-fill);
+  --bs-list-group-active-color: var(--lt-brand-on);
+}
+.nav-pills { --bs-nav-pills-link-active-bg: var(--lt-brand-fill); }
+.pagination {
+  --bs-pagination-active-bg: var(--lt-brand-fill);
+  --bs-pagination-active-border-color: var(--lt-brand-fill);
+  --bs-pagination-focus-box-shadow: 0 0 0 0.2rem var(--lt-brand-focus-ring);
+}
+.text-bg-primary {
+  color: var(--lt-brand-on) !important;
+  background-color: var(--lt-brand-fill) !important;
+}
+
+/* Default blue light palette; green and dark palettes keep their surfaces. */
+:root:not([data-accent="green"]):not([data-theme="dark"]) {
+  --lt-bg: #edf0f5;
+  --lt-ink: #1c2733;
+  --lt-border: #d3dae4;
+  --lt-shadow-soft: 0 1px 2px rgba(16,24,40,.04), 0 4px 12px rgba(16,24,40,.05);
+}
+:root:not([data-accent="green"]):not([data-theme="dark"]) .visual-page,
+:root:not([data-accent="green"]):not([data-theme="dark"]) .top-header {
+  --bs-body-color: var(--lt-ink);
+  --bs-secondary-color: var(--lt-muted);
+  --bs-border-color: var(--lt-border);
+  --lt-card-bg: var(--lt-surface);
+  --lt-subtle-bg: var(--lt-surface-soft);
+  --lt-ink: inherit;
+  --lt-muted: inherit;
+  --lt-border: inherit;
+}
+:root:not([data-accent="green"]):not([data-theme="dark"]) .panel-card,
+:root:not([data-accent="green"]):not([data-theme="dark"]) .metric-card,
+:root:not([data-accent="green"]):not([data-theme="dark"]) .lt-card {
+  box-shadow: var(--lt-shadow-soft);
+}
+
+/* Compact Cloudflare domain summary and local authorization management. */
+.cloudflare-zone-tags { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex-wrap: wrap; }
+.cloudflare-zone-tag, .cloudflare-zone-more { display: inline-block; max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; padding: 2px 7px; border: 1px solid var(--lt-border); border-radius: 4px; background: var(--lt-surface-soft); color: inherit; font: inherit; }
+.cloudflare-zone-more { cursor: pointer; flex-shrink: 0; }
+.dialog-card.devtunnel-resource-dialog.cloudflare-domains-dialog { width: min(680px, calc(100vw - 32px)); }
+.cloudflare-domains-list { max-height: min(48vh, 380px); overflow-y: auto; margin-top: 12px; }
+.cloudflare-domain-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--lt-border); }
+.cloudflare-domain-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cloudflare-domain-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloudflare-domain-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.cloudflare-domain-confirm { margin-top: 12px; padding: 12px; border: 1px solid var(--lt-border); border-radius: 4px; }
+@media (max-width: 600px) { .cloudflare-domain-row { align-items: stretch; flex-direction: column; gap: 8px; } .cloudflare-zone-tag { max-width: 150px; } }
+
+.dialog-card.devtunnel-resource-dialog.cli-maintenance-dialog { width: min(520px, calc(100vw - 32px)); outline: none; }
+.cli-maintenance-versions { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: center; gap: 10px 14px; margin-bottom: 14px; }
+.cli-maintenance-versions dt { color: var(--lt-muted); font-weight: 400; }
+.cli-maintenance-versions dd { margin: 0; min-width: 0; }
+.cli-maintenance-previous { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cli-maintenance-options { border-top: 1px solid var(--lt-border); padding-top: 12px; }
+.cli-maintenance-options summary { cursor: pointer; color: var(--lt-muted); }
+.cli-maintenance-path { overflow-wrap: anywhere; user-select: text; font-size: 12px; }
+.cli-maintenance-actions { display: flex; flex-wrap: wrap; gap: 6px; }

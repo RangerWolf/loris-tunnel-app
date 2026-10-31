@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"loris-tunnel/internal/autorestart"
+	"loris-tunnel/internal/cloudsync"
 	"loris-tunnel/internal/conf"
 	"loris-tunnel/internal/uilocale"
 
@@ -29,6 +30,7 @@ type ConfigLocationInfo struct {
 type ConfigDirTargetConflict struct {
 	HasConfigToml bool `json:"hasConfigToml"`
 	HasUILocale   bool `json:"hasUILocale"`
+	HasCloudSync  bool `json:"hasCloudSync"`
 }
 
 // GetConfigLocationInfo returns paths for display in settings (custom dir via config.root).
@@ -77,7 +79,7 @@ func (a *App) SelectConfigDirectory() (string, error) {
 	return strings.TrimSpace(dir), nil
 }
 
-// GetConfigDirTargetConflict reports whether the target directory already has config.toml / ui.locale.
+// GetConfigDirTargetConflict reports existing configuration artifacts.
 func (a *App) GetConfigDirTargetConflict(targetDir string) (ConfigDirTargetConflict, error) {
 	var out ConfigDirTargetConflict
 	if err := a.ensureReady(); err != nil {
@@ -94,13 +96,21 @@ func (a *App) GetConfigDirTargetConflict(targetDir string) (ConfigDirTargetConfl
 	absTarget = filepath.Clean(absTarget)
 	out.HasConfigToml = regularExistsFile(filepath.Join(absTarget, conf.DefaultConfigFileName))
 	out.HasUILocale = regularExistsFile(filepath.Join(absTarget, uilocale.FileName))
+	for _, name := range cloudsync.SettingsFiles() {
+		out.HasCloudSync = out.HasCloudSync || regularExistsFile(filepath.Join(absTarget, name))
+	}
 	return out, nil
 }
 
-// SetConfigDirectory copies (or selectively keeps) config.toml / ui.locale into targetDir — same atomic+MD5
-// path for both — then writes config.root and removes prior files. overwriteExisting applies when targets
-// already exist: false keeps existing files on disk and only fills gaps from the current sources.
+// SetConfigDirectory moves configuration artifacts, keeping both environments’ sync settings paired with config.toml.
+// overwriteExisting=false keeps the target profile when its TOML already exists.
 func (a *App) SetConfigDirectory(targetDir string, overwriteExisting bool) error {
+	if a.cloudSync != nil {
+		unlock := a.cloudSync.LockForRelocation()
+		defer unlock()
+	}
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
@@ -146,12 +156,19 @@ func (a *App) SetConfigDirectory(targetDir string, overwriteExisting bool) error
 		}
 	}
 
+	if a.cloudSync != nil {
+		a.cloudSync.Suspend()
+	}
 	// Remove previous config files (not logs).
 	if !pathsEqualPathfile(srcDir, absTarget) {
 		if err := conf.TryRemoveFile(srcPath); err != nil {
 			slog.Warn("could not remove previous config.toml", "path", srcPath, "error", err)
 		}
 		_ = conf.TryRemoveFile(filepath.Join(srcDir, uilocale.FileName))
+		_ = conf.TryRemoveFile(filepath.Join(srcDir, "frp-local.json"))
+		for _, name := range cloudsync.SettingsFiles() {
+			_ = conf.TryRemoveFile(filepath.Join(srcDir, name))
+		}
 	}
 
 	slog.Info("config directory relocated", "anchor", anchor, "target", absTarget)
@@ -163,6 +180,12 @@ func (a *App) SetConfigDirectory(targetDir string, overwriteExisting bool) error
 // If the app already uses the implicit path, only config.root is removed if present.
 // overwriteExisting mirrors SetConfigDirectory: true replaces existing artifacts in the default dir.
 func (a *App) ResetConfigDirectoryToDefault(overwriteExisting bool) error {
+	if a.cloudSync != nil {
+		unlock := a.cloudSync.LockForRelocation()
+		defer unlock()
+	}
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
@@ -189,8 +212,15 @@ func (a *App) ResetConfigDirectoryToDefault(overwriteExisting bool) error {
 		return fmt.Errorf("remove config.root: %w", err)
 	}
 
+	if a.cloudSync != nil {
+		a.cloudSync.Suspend()
+	}
 	_ = conf.TryRemoveFile(srcPath)
 	_ = conf.TryRemoveFile(filepath.Join(srcDir, uilocale.FileName))
+	_ = conf.TryRemoveFile(filepath.Join(srcDir, "frp-local.json"))
+	for _, name := range cloudsync.SettingsFiles() {
+		_ = conf.TryRemoveFile(filepath.Join(srcDir, name))
+	}
 
 	slog.Info("config directory reset to default", "implicit", implicit)
 	return nil
@@ -214,8 +244,7 @@ func regularExistsFile(path string) bool {
 	return err == nil && !st.IsDir()
 }
 
-// syncArtifactsToTargetDir aligns config.toml and ui.locale between srcDir and dstDir using the same
-// AtomicCopyFileWithMD5Verify for each file copied. overwriteExisting replaces both when source files exist.
+// syncArtifactsToTargetDir copies configuration files using atomic, checksum-verified copies.
 func syncArtifactsToTargetDir(srcDir, dstDir string, overwriteExisting bool) error {
 	dstToml := filepath.Join(dstDir, conf.DefaultConfigFileName)
 	srcToml := filepath.Join(srcDir, conf.DefaultConfigFileName)
@@ -242,15 +271,38 @@ func syncArtifactsToTargetDir(srcDir, dstDir string, overwriteExisting bool) err
 		localeShouldCopy = false
 	}
 
-	if !localeShouldCopy {
-		return nil
-	}
-
-	if err := conf.AtomicCopyFileWithMD5Verify(srcLoc, dstLoc); err != nil {
-		if copyToml {
-			_ = conf.TryRemoveFile(dstToml)
+	if localeShouldCopy {
+		if err := conf.AtomicCopyFileWithMD5Verify(srcLoc, dstLoc); err != nil {
+			if copyToml {
+				_ = conf.TryRemoveFile(dstToml)
+			}
+			return fmt.Errorf("copy ui.locale: %w", err)
 		}
-		return fmt.Errorf("copy ui.locale: %w", err)
+	}
+	// Keep the connection paired with the TOML selected above; do not mix profiles.
+	if copyToml {
+		srcFRP := filepath.Join(srcDir, "frp-local.json")
+		dstFRP := filepath.Join(dstDir, "frp-local.json")
+		if data, err := os.ReadFile(srcFRP); err == nil {
+			if err = conf.WritePrivateAtomic(dstFRP, data); err != nil {
+				return fmt.Errorf("copy local FRP settings: %w", err)
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		} else if err = conf.TryRemoveFile(dstFRP); err != nil {
+			return err
+		}
+		for _, name := range cloudsync.SettingsFiles() {
+			srcSync := filepath.Join(srcDir, name)
+			dstSync := filepath.Join(dstDir, name)
+			if regularExistsFile(srcSync) {
+				if err := conf.AtomicCopyFileWithMD5Verify(srcSync, dstSync); err != nil {
+					return fmt.Errorf("copy cloud sync settings: %w", err)
+				}
+			} else if err := conf.TryRemoveFile(dstSync); err != nil {
+				return fmt.Errorf("clear stale cloud sync settings: %w", err)
+			}
+		}
 	}
 	return nil
 }

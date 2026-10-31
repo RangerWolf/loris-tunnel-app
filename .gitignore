@@ -21,6 +21,9 @@ frontend/package.json.md5
 
 # Local machine / runtime config
 config.toml
+cloud-sync.json
+cloud-sync.json.tmp
+sync*.json
 ui.locale
 .DS_Store
 
@@ -28,3 +31,8 @@ ui.locale
 *.log
 
 **/.vitepress/cache
+
+# Local provider metadata cache
+/provider-cache/
+/frp-local.json
+/frp/

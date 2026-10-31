@@ -1,8 +1,11 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Tooltip } from 'bootstrap'
 import AIDebugResultCard from '../common/AIDebugResultCard.vue'
+import FRPTunnelForm from '../tunnel-forms/FRPTunnelForm.vue'
+import DevTunnelForm from '../tunnel-forms/DevTunnelForm.vue'
+import CloudflareTunnelForm from '../tunnel-forms/CloudflareTunnelForm.vue'
 
 const props = defineProps({
   show: {
@@ -76,6 +79,34 @@ const props = defineProps({
   aiDebugEnabled: {
     type: Boolean,
     default: false
+  },
+  devTunnelResources: {
+    type: Object,
+    default: () => ({ state: 'idle', detail: '', items: [] })
+  },
+  devTunnelAccountState: {
+    type: String,
+    default: ''
+  },
+  devTunnelRegionProbe: {
+    type: Object,
+    default: () => ({ state: 'idle', regions: [], loading: false })
+  },
+  cloudflareResources: {
+    type: Object,
+    default: () => ({ state: 'idle', detail: '', items: [] })
+  },
+  cloudflareAccountState: {
+    type: String,
+    default: ''
+  },
+  cloudflareZones: {
+    type: Object,
+    default: () => ({ state: 'idle', detail: '', items: [] })
+  },
+  editingTunnelStatus: {
+    type: String,
+    default: ''
   }
 })
 
@@ -90,15 +121,42 @@ const emit = defineEmits([
   'inline-key-file-change',
   'test-connection',
   'ai-debug',
-  'report-ai-content'
+  'report-ai-content',
+  'provider-change',
+  'manage-frp',
+  'manage-devtunnel-ids',
+  'refresh-devtunnel-resources',
+  'select-devtunnel-id',
+  'test-devtunnel-regions',
+  'manage-cloudflare-ids',
+  'refresh-cloudflare-resources',
+  'refresh-cloudflare-zones',
+  'select-cloudflare-id',
+  'open-url',
 ])
 
 const { t } = useI18n()
 const selectedJumpersHintRef = ref(null)
+const providerContentRef = ref(null)
 const showMoreJumpers = ref(false)
 let selectedJumpersTooltip = null
+const isDevTunnel = computed(() => props.tunnelForm?.provider === 'devtunnel')
+const isFRP = computed(() => props.tunnelForm?.provider === 'frp')
+
+function applyFRPNameValidity(input = document.getElementById('tunnel-name')) {
+  if (!input) return
+  const name = String(props.tunnelForm.frpProxyName || props.tunnelForm.name || '').trim()
+  const invalid = isFRP.value && name && !/^[a-zA-Z0-9_-]{1,64}$/.test(name)
+  input.setCustomValidity(invalid ? t('app.frp.nameAsProxyInvalid') : '')
+}
+
+function syncFRPNameValidity(event) {
+  applyFRPNameValidity(event.target)
+}
+const isCloudflare = computed(() => props.tunnelForm?.provider === 'cloudflare')
 
 const localPortConflictTunnels = computed(() => {
+  if (isDevTunnel.value || isCloudflare.value || isFRP.value) return []
   const port = Number(props.tunnelForm?.localPort)
   if (!Number.isInteger(port) || port < 1) return []
   const editingId = Number(props.editingTunnelId)
@@ -230,6 +288,19 @@ function onPrimaryJumperChange(event) {
   if (!Number.isInteger(nextId) || nextId <= 0) return
   emit('set-primary-jumper', nextId)
 }
+
+function onProviderChange(event) {
+  emit('provider-change', event?.target?.value || 'ssh')
+}
+
+watch(
+  () => [props.tunnelForm?.provider, props.tunnelForm?.frpProxyName],
+  async () => {
+    await nextTick()
+    applyFRPNameValidity()
+    if (providerContentRef.value) providerContentRef.value.scrollTop = 0
+  },
+)
 </script>
 
 <template>
@@ -239,16 +310,19 @@ function onPrimaryJumperChange(event) {
         <h3 class="dialog-title">{{ editingTunnelId ? $t('app.modals.tunnel.editTitle') : $t('app.modals.tunnel.newTitle') }}</h3>
       </div>
       <form
-        class="dialog-body"
+        id="tunnel-editor-form"
+        class="tunnel-dialog-form"
         autocapitalize="none"
         autocorrect="off"
         spellcheck="false"
         @submit.prevent="$emit('submit')"
       >
+        <div class="tunnel-dialog-common">
         <div class="row g-3">
-          <div :class="groups.length > 0 ? 'col-md-4' : 'col-md-6'">
+          <div class="col-6 col-md-3">
             <label class="form-label">{{ $t('app.modals.tunnel.name') }}</label>
             <input
+              id="tunnel-name"
               v-model="tunnelForm.name"
               class="form-control"
               type="text"
@@ -257,9 +331,10 @@ function onPrimaryJumperChange(event) {
               spellcheck="false"
               maxlength="20"
               required
+              @input="syncFRPNameValidity"
             />
           </div>
-          <div v-if="groups.length > 0" class="col-md-4">
+          <div class="col-6 col-md-3">
             <label class="form-label">{{ $t('app.modals.tunnel.group') }}</label>
             <select v-model.number="tunnelForm.groupId" class="form-select">
               <option :value="0">{{ $t('app.tunnels.groups.ungrouped') }}</option>
@@ -268,14 +343,57 @@ function onPrimaryJumperChange(event) {
               </option>
             </select>
           </div>
-          <div :class="groups.length > 0 ? 'col-md-4' : 'col-md-6'">
+          <div class="col-6 col-md-3">
+            <label class="form-label">{{ $t('app.modals.tunnel.provider') }}</label>
+            <select class="form-select" :value="tunnelForm.provider || 'ssh'" :disabled="!!editingTunnelId" @change="onProviderChange">
+              <option value="ssh">{{ $t('app.providers.ssh') }}</option>
+              <option value="devtunnel">{{ $t('app.providers.devtunnel') }}</option>
+              <option value="frp">FRP</option>
+              <option value="cloudflare">{{ $t('app.providers.cloudflare') }}</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-3">
             <label class="form-label">{{ $t('app.modals.tunnel.mode') }}</label>
-            <select v-model="tunnelForm.mode" class="form-select">
+            <input v-if="isDevTunnel || isCloudflare || isFRP" class="form-control" :value="$t('app.options.mode.auto')" disabled />
+            <select v-else v-model="tunnelForm.mode" class="form-select">
               <option v-for="mode in modeOptions" :key="mode.value" :value="mode.value">
                 {{ mode.label }}
               </option>
             </select>
           </div>
+        </div>
+        </div>
+        <div ref="providerContentRef" class="tunnel-dialog-provider-content">
+        <DevTunnelForm
+          v-if="isDevTunnel"
+          :tunnel-form="tunnelForm"
+          :resources="devTunnelResources"
+          :tunnels="tunnels"
+          :editing-tunnel-id="editingTunnelId"
+          :account-state="devTunnelAccountState"
+          :region-probe="devTunnelRegionProbe"
+          @manage="emit('manage-devtunnel-ids')"
+          @refresh="emit('refresh-devtunnel-resources')"
+          @select-id="emit('select-devtunnel-id', $event)"
+          @open-url="emit('open-url', $event)"
+          @test-regions="emit('test-devtunnel-regions')"
+        />
+        <FRPTunnelForm v-else-if="isFRP" :tunnel-form="tunnelForm" @manage="emit('manage-frp')" />
+        <CloudflareTunnelForm
+          v-else-if="isCloudflare"
+          :tunnel-form="tunnelForm"
+          :resources="cloudflareResources"
+          :tunnels="tunnels"
+          :editing-tunnel-id="editingTunnelId"
+          :account-state="cloudflareAccountState"
+          :zones="cloudflareZones"
+          @manage="emit('manage-cloudflare-ids')"
+          @refresh="emit('refresh-cloudflare-resources')"
+          @refresh-zones="emit('refresh-cloudflare-zones')"
+          @select-id="emit('select-cloudflare-id', $event)"
+          @open-url="emit('open-url', $event)"
+        />
+        <div v-else class="row g-3">
           <div class="col-md-12">
             <div class="tunnel-endpoint-grid">
               <div>
@@ -465,7 +583,7 @@ function onPrimaryJumperChange(event) {
           </div>
         </div>
 
-        <div v-if="tunnelForm.appendNewJumper" class="inline-jumper-block mt-3">
+        <div v-if="tunnelForm.appendNewJumper && !isDevTunnel && !isCloudflare && !isFRP" class="inline-jumper-block mt-3">
           <div class="block-title">{{ $t('app.modals.tunnel.quickCreateJumper') }}</div>
           <div class="row g-2 mt-0 inline-jumper-form-grid">
             <div class="col-md-6">
@@ -605,44 +723,15 @@ function onPrimaryJumperChange(event) {
           </div>
           <div class="col-md-12">
             <div class="form-check form-switch">
-              <input id="autoStartSwitch" v-model="tunnelForm.autoStart" class="form-check-input" type="checkbox" />
+              <input id="autoStartSwitch" v-model="tunnelForm.autoStart" class="form-check-input" type="checkbox" aria-describedby="autoStartHint" />
               <label for="autoStartSwitch" class="form-check-label">{{ $t('app.modals.tunnel.autoStart') }}</label>
             </div>
+            <div id="autoStartHint" class="field-note">{{ $t('app.modals.tunnel.autoStartHint') }}</div>
           </div>
         </div>
 
         <p v-if="tunnelValidationError" class="form-error mb-0 mt-3">{{ tunnelValidationError }}</p>
 
-        <div class="dialog-actions mt-4">
-          <div class="dialog-left-actions">
-            <button
-              type="button"
-              class="btn btn-outline-primary"
-              :disabled="tunnelTest.status === 'testing'"
-              @click="$emit('test-connection')"
-            >
-              {{ tunnelTest.status === 'testing' ? $t('app.modals.tunnel.testing') : $t('app.modals.tunnel.testConnection') }}
-            </button>
-            <span
-              v-if="!aiDebugEnabled && tunnelTest.message"
-              class="test-result"
-              :class="{ success: tunnelTest.status === 'success', error: tunnelTest.status === 'error' }"
-            >
-              {{ tunnelTest.message }}
-            </span>
-            <span
-              v-else-if="aiDebugEnabled && tunnelTest.message && tunnelTest.status !== 'error'"
-              class="test-result"
-              :class="{ success: tunnelTest.status === 'success' }"
-            >
-              {{ tunnelTest.message }}
-            </span>
-          </div>
-          <div class="dialog-right-actions">
-            <button type="button" class="btn btn-outline-secondary" @click="$emit('close')">{{ $t('app.common.cancel') }}</button>
-            <button type="submit" class="btn btn-primary">{{ $t('app.common.save') }}</button>
-          </div>
-        </div>
         <div v-if="aiDebugEnabled && tunnelTest.message && tunnelTest.status === 'error'" class="ai-debug-inline-panel mt-3">
           <div class="ai-debug-inline-head">
             <div>
@@ -670,7 +759,34 @@ function onPrimaryJumperChange(event) {
             @report-content="$emit('report-ai-content')"
           />
         </div>
+        </div>
       </form>
+      <div class="tunnel-dialog-footer">
+        <div class="dialog-left-actions">
+          <button
+            type="button"
+            class="btn btn-outline-primary"
+            :disabled="tunnelTest.status === 'testing'"
+            @click="$emit('test-connection')"
+          >
+            {{ tunnelTest.status === 'testing' ? $t('app.modals.tunnel.testing') : $t('app.modals.tunnel.testConnection') }}
+          </button>
+        </div>
+        <div
+          v-if="tunnelTest.message && (!aiDebugEnabled || tunnelTest.status !== 'error')"
+          class="test-result tunnel-footer-result"
+          :class="{ success: tunnelTest.status === 'success', error: tunnelTest.status === 'error' }"
+          :title="tunnelTest.message"
+          role="status"
+          aria-live="polite"
+        >
+          {{ tunnelTest.message }}
+        </div>
+        <div class="dialog-right-actions">
+          <button type="button" class="btn btn-outline-secondary" @click="$emit('close')">{{ $t('app.common.cancel') }}</button>
+          <button type="submit" class="btn btn-primary" form="tunnel-editor-form">{{ $t('app.common.save') }}</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

@@ -1,4 +1,4 @@
-const DEFAULT_BACKEND_API_BASE_URL = 'http://localhost:8000/api/v1'
+const DEFAULT_BACKEND_API_BASE_URL = 'http://127.0.0.1:8000/api/v1'
 const REQUEST_TIMEOUT_MS = 10000
 
 function trimTrailingSlash(url) {
@@ -62,7 +62,7 @@ async function request(path, options = {}) {
       throw new Error('Request timeout while connecting to backend API.')
     }
     if (error instanceof TypeError) {
-      throw new Error(`Cannot connect to backend API at ${BACKEND_API_BASE_URL}. Please make sure localhost:8000 is running.`)
+      throw new Error(`Cannot connect to backend API at ${BACKEND_API_BASE_URL}.`)
     }
     throw error
   } finally {

@@ -1,36 +1,26 @@
-@font-face {
-  font-family: "Nunito";
-  font-style: normal;
-  font-weight: 400;
-  src: local(""), url("assets/fonts/nunito-v16-latin-regular.woff2") format("woff2");
-}
-
 :root {
   color-scheme: light;
-  --lt-bg: #eef4fb;
-  --lt-bg-radial-a: rgba(104, 160, 255, 0.25);
-  --lt-bg-radial-b: rgba(108, 208, 175, 0.22);
+  --lt-bg: #f5f7fa;
   --lt-surface: #ffffff;
-  --lt-surface-soft: #f7fbff;
-  --lt-surface-glass: rgba(255, 255, 255, 0.74);
-  --lt-ink: #13283e;
-  --lt-muted: #667d96;
-  --lt-border: #d8e3f0;
-  --lt-border-strong: #c5d3e5;
-  --lt-shadow-soft: 0 12px 28px rgba(17, 36, 55, 0.08);
+  --lt-surface-soft: #f0f3f8;
+  --lt-tunnel-group-bg: #f7f9fc;
+  --lt-tunnel-group-border: #e3e8ef;
+  --lt-jumper-section-bg: #f7f9fc;
+  --lt-jumper-section-border: #e3e8ef;
+  --lt-surface-glass: #ffffff;
+  --lt-ink: #1e2327;
+  --lt-muted: #5d6770;
+  --lt-border: #dce2eb;
+  --lt-border-strong: #c9d3e0;
+  --lt-sidebar-divider: #cbd2d9;
+  --lt-shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.025);
   --lt-input-bg: #ffffff;
-  --lt-input-border: #cedbec;
-  --lt-input-focus-border: #7fb0ef;
-  --lt-input-focus-ring: rgba(30, 107, 223, 0.16);
+  --lt-input-border: var(--lt-border-strong);
   --lt-table-head: #68809b;
   --lt-table-head-border: #d7e1ee;
   --lt-table-row-border: #e2eaf4;
   --lt-scroll-thumb: #b9c9dd;
   --lt-scroll-track: rgba(193, 209, 228, 0.28);
-  --lt-accent-hover: #edf4ff;
-  --lt-accent-active: #e4efff;
-  --lt-accent-border: #c7dbfe;
-  --lt-accent-ink: #0d5bd4;
   --lt-positive-bg: #eef8f2;
   --lt-positive-border: #a6d2b6;
   --lt-positive-ink: #246f43;
@@ -40,51 +30,73 @@
   --lt-danger-bg: #ffefef;
   --lt-danger-border: #efb2b2;
   --lt-danger-ink: #ad2f2f;
+  --lt-sync-error-bg: #fef2f2;
+  --lt-sync-error-border: #fecaca;
+  --lt-sync-error-ink: #b91c1c;
+  --lt-sync-error-muted: #c24141;
+  --lt-sync-error-hover: #fee2e2;
+  --lt-sync-conflict-bg: #fffbeb;
+  --lt-sync-conflict-border: #fde68a;
+  --lt-sync-conflict-ink: #b45309;
+  --lt-sync-conflict-muted: #a16207;
+  --lt-sync-conflict-hover: #fef3c7;
+  --lt-sync-update-bg: #eff6ff;
+  --lt-sync-update-border: #bfdbfe;
+  --lt-sync-update-ink: #1d4ed8;
+  --lt-sync-update-muted: #2563eb;
+  --lt-sync-update-hover: #dbeafe;
   --lt-neutral-bg: #f3f7fc;
   --lt-neutral-border: #d5dfeb;
   --lt-neutral-ink: #4f637b;
   --lt-overlay-bg: rgba(18, 31, 49, 0.46);
   --lt-dialog-shadow: 0 22px 52px rgba(24, 41, 62, 0.22);
-  --lt-inline-bg: #f8fbff;
-  --lt-inline-border: #c6d9f8;
+  --lt-inline-bg: var(--lt-accent-hover);
+  --lt-inline-border: var(--lt-accent-border);
   --lt-hint-bg: #f7f9fc;
   --lt-hint-border: #cdd9e8;
   --lt-hint-ink: #677d98;
-  --lt-radius-md: 8px;
-  --lt-radius-lg: 10px;
-  --lt-radius-xl: 12px;
-  --bs-primary: #1b6be0;
-  --bs-primary-rgb: 27, 107, 224;
+  --lt-radius-md: 7px;
+  --lt-radius-lg: 8px;
+  --lt-radius-xl: 10px;
   --bs-secondary: #4f6278;
   --bs-secondary-rgb: 79, 98, 120;
 }
 
+/* Preserve loris-101-v1's original neutral surfaces for the green light theme. */
+:root[data-accent="green"] {
+  --lt-bg: #f5f6f4;
+  --lt-surface-soft: #eef0ed;
+  --lt-tunnel-group-bg: #f7f8f6;
+  --lt-tunnel-group-border: #e6e9e5;
+  --lt-jumper-section-bg: #f7f8f6;
+  --lt-jumper-section-border: #e6e9e5;
+  --lt-border: #dde1dc;
+  --lt-border-strong: #cbd2cc;
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --lt-bg: #0a1322;
-  --lt-bg-radial-a: rgba(81, 136, 255, 0.26);
-  --lt-bg-radial-b: rgba(34, 184, 151, 0.18);
-  --lt-surface: #121f31;
-  --lt-surface-soft: #18273a;
-  --lt-surface-glass: rgba(16, 27, 42, 0.74);
-  --lt-ink: #e6eef9;
-  --lt-muted: #99aec6;
-  --lt-border: #273c56;
-  --lt-border-strong: #365172;
-  --lt-shadow-soft: 0 16px 34px rgba(2, 8, 17, 0.58);
+  --lt-bg: #15191c;
+  --lt-surface: #1d2226;
+  --lt-surface-soft: #262c31;
+  --lt-tunnel-group-bg: #22272b;
+  --lt-tunnel-group-border: #343c41;
+  --lt-jumper-section-bg: rgba(255, 255, 255, 0.04);
+  --lt-jumper-section-border: rgba(255, 255, 255, 0.08);
+  --lt-surface-glass: #1d2226;
+  --lt-ink: #e6e9eb;
+  --lt-muted: #a0aab2;
+  --lt-border: #323a40;
+  --lt-border-strong: #48545b;
+  --lt-sidebar-divider: #3a4148;
+  --lt-shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.16);
   --lt-input-bg: #101b2b;
-  --lt-input-border: #2b4460;
-  --lt-input-focus-border: #67a9ff;
-  --lt-input-focus-ring: rgba(103, 169, 255, 0.28);
+  --lt-input-border: var(--lt-border-strong);
   --lt-table-head: #a5b8d0;
   --lt-table-head-border: #2b4562;
   --lt-table-row-border: #21354d;
   --lt-scroll-thumb: #365170;
   --lt-scroll-track: rgba(37, 58, 82, 0.4);
-  --lt-accent-hover: #1e2f45;
-  --lt-accent-active: #243a55;
-  --lt-accent-border: #365576;
-  --lt-accent-ink: #8dbfff;
   --lt-positive-bg: rgba(56, 143, 92, 0.22);
   --lt-positive-border: #356c4d;
   --lt-positive-ink: #92ddae;
@@ -94,18 +106,31 @@
   --lt-danger-bg: rgba(173, 58, 58, 0.24);
   --lt-danger-border: #8e4747;
   --lt-danger-ink: #f0a4a4;
+  --lt-sync-error-bg: #3b1818;
+  --lt-sync-error-border: #9a3030;
+  --lt-sync-error-ink: #fecaca;
+  --lt-sync-error-muted: #e8b0b0;
+  --lt-sync-error-hover: #4a2222;
+  --lt-sync-conflict-bg: #3a2a10;
+  --lt-sync-conflict-border: #9a6412;
+  --lt-sync-conflict-ink: #fde68a;
+  --lt-sync-conflict-muted: #e7c98a;
+  --lt-sync-conflict-hover: #463314;
+  --lt-sync-update-bg: #172033;
+  --lt-sync-update-border: #3d5a80;
+  --lt-sync-update-ink: #bfdbfe;
+  --lt-sync-update-muted: #93c5fd;
+  --lt-sync-update-hover: #1e2c44;
   --lt-neutral-bg: #1a2a3f;
   --lt-neutral-border: #324c69;
   --lt-neutral-ink: #a2b6cd;
   --lt-overlay-bg: rgba(5, 11, 20, 0.68);
   --lt-dialog-shadow: 0 28px 58px rgba(2, 8, 16, 0.72);
-  --lt-inline-bg: #13243a;
-  --lt-inline-border: #2c4a68;
+  --lt-inline-bg: var(--lt-accent-hover);
+  --lt-inline-border: var(--lt-accent-border);
   --lt-hint-bg: #1a2b42;
   --lt-hint-border: #3a5677;
   --lt-hint-ink: #9ab2cb;
-  --bs-primary: #5a9fff;
-  --bs-primary-rgb: 90, 159, 255;
   --bs-secondary: #95abc3;
   --bs-secondary-rgb: 149, 171, 195;
 }
@@ -131,11 +156,8 @@ html {
 body {
   margin: 0;
   color: var(--lt-ink);
-  font-family: "Nunito", "Manrope", "SF Pro Text", "Segoe UI", sans-serif;
-  background:
-    radial-gradient(circle at 0% 0%, var(--lt-bg-radial-a) 0%, rgba(202, 225, 255, 0) 34%),
-    radial-gradient(circle at 100% 14%, var(--lt-bg-radial-b) 0%, rgba(211, 244, 233, 0) 30%),
-    var(--lt-bg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  background: var(--lt-bg);
 }
 
 #app {

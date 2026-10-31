@@ -4,6 +4,8 @@ import { computed, ref } from 'vue'
 const SPARKLINE_WIDTH = 200
 const SPARKLINE_HEIGHT = 28
 
+const isDev = import.meta.env.DEV
+
 const props = defineProps({
   pages: {
     type: Array,
@@ -57,6 +59,7 @@ const props = defineProps({
 
 defineEmits(['switch-page', 'upgrade', 'open-release-page', 'toggle-collapse'])
 
+const displayVersion = computed(() => `${props.appVersion}${isDev ? '-dev' : ''}`)
 const chartRef = ref(null)
 const hoverIndex = ref(null)
 const hoverX = ref(0)
@@ -167,17 +170,17 @@ function onChartMouseLeave() {
       <div class="brand-logo-wrap">
         <div class="brand-meta">
           <div class="brand-title">{{ $t('app.title') }}</div>
-          <div class="brand-subtitle">{{ $t('app.sidebar.subtitle') }}</div>
         </div>
         <button
           type="button"
-          class="btn sidebar-collapse-btn"
+          class="sidebar-collapse-btn"
           :title="collapsed ? $t('app.sidebar.expand') : $t('app.sidebar.collapse')"
           :aria-label="collapsed ? $t('app.sidebar.expand') : $t('app.sidebar.collapse')"
           @click="$emit('toggle-collapse')"
         >
-          <i class="bi" :class="collapsed ? 'bi-layout-sidebar-inset' : 'bi-layout-sidebar'" aria-hidden="true" />
+          <span aria-hidden="true">{{ collapsed ? '›' : '‹' }}</span>
         </button>
+        <div v-if="!collapsed" class="brand-subtitle">{{ $t('app.sidebar.subtitle') }}</div>
       </div>
 
       <div class="nav-list mt-4">
@@ -206,6 +209,7 @@ function onChartMouseLeave() {
         class="sidebar-traffic"
         :class="{ collapsed }"
         :aria-label="$t('app.sidebar.traffic')"
+        :title="$t('app.sidebar.trafficSshOnly')"
       >
         <div
           v-if="!collapsed"
@@ -263,9 +267,9 @@ function onChartMouseLeave() {
         </div>
       </div>
 
-      <div class="sidebar-footer">
+      <div class="sidebar-footer" :class="{ 'dev-mode': isDev }">
         <span class="sidebar-version" :class="{ compact: collapsed }">
-          <template v-if="!collapsed">v{{ appVersion }}</template>
+          <template v-if="!collapsed">v{{ displayVersion }}</template>
           <template v-else>v</template>
           <span v-if="hasNewVersion" class="version-new-badge" @click="$emit('open-release-page')">new</span>
         </span>

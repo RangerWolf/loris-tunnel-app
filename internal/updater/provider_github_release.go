@@ -391,3 +391,13 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+// CompareVersions returns a numeric/semver comparison, or false for unknown formats.
+func CompareVersions(a, b string) (int, bool) {
+	left, okLeft := parseSemver(a)
+	right, okRight := parseSemver(b)
+	if !okLeft || !okRight {
+		return 0, false
+	}
+	return compareSemver(left, right), true
+}

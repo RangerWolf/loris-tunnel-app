@@ -310,6 +310,9 @@ watch(
                         v-model="row.name"
                         class="form-control form-control-sm"
                         type="text"
+                        autocapitalize="none"
+                        autocorrect="off"
+                        spellcheck="false"
                         :disabled="row.importStatus === 'error'"
                       />
                       <div class="field-note mt-1">

@@ -1,36 +1,110 @@
 package biz
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"loris-tunnel/internal/frp"
+	"net"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"loris-tunnel/internal/climaint"
+	"loris-tunnel/internal/cloudflared"
 	"loris-tunnel/internal/conf"
+	"loris-tunnel/internal/devtunnel"
 	"loris-tunnel/internal/forward"
 	"loris-tunnel/internal/model"
 )
 
 var (
-	ErrTunnelNotFound         = errors.New("tunnel not found")
-	ErrFreePlanRunningLimit   = errors.New("free plan running tunnel limit exceeded")
+	ErrTunnelNotFound       = errors.New("tunnel not found")
+	ErrFreePlanRunningLimit = errors.New("running tunnel limit exceeded")
 )
 
-// FreePlanRunningLimit is the max concurrent running tunnels for non-Pro users.
-const FreePlanRunningLimit = 3
+// FreePlanRunningLimit applies to free users across all providers.
+// MaxRunningTunnels is retained as an alias for existing callers.
+const (
+	MaxRunningTunnels    = 3
+	FreePlanRunningLimit = MaxRunningTunnels
+)
+
+// tunnelRuntime is the small set of operations every provider must support.
+// SSH latency and byte counters stay optional and are read with a type assert.
+type tunnelRuntime interface {
+	Stop() error
+	Done() <-chan struct{}
+	Err() error
+	Events() <-chan forward.RuntimeEvent
+}
+
+type latencyRuntime interface {
+	LastLatency() (time.Duration, bool)
+}
+
+type trafficRuntime interface {
+	Traffic() (up, down uint64)
+}
+
+type urlRuntime interface {
+	PublicURL() string
+}
 
 type TunnelBiz struct {
-	storage *conf.Storage
-	mu      sync.Mutex
-	runs    map[int]*forward.LocalForward
+	cliMu              sync.Mutex
+	cliManagers        map[string]*climaint.Manager
+	cliChanging        map[string]bool
+	devSessionMu       sync.Mutex
+	devSessions        map[string]*devServiceSession
+	resourceMu         sync.Mutex
+	resourceLocks      map[string]*sync.Mutex
+	deletionMu         sync.Mutex
+	deletionBusy       map[string]bool
+	beforeForgetRecord func()
+	newDevServiceHost  func(string, []devtunnel.ServiceTarget) devServiceHost
+	devCacheMu         sync.Mutex
+	cloudflareCacheMu  sync.Mutex
+	cloudflareAuthMu   sync.Mutex
+	devAccountKnown    bool
+	devAccount         string
+	frp                *frp.Client
+	frpMu              sync.Mutex
+	storage            *conf.Storage
+	dev                *devtunnel.Client
+	cloudflare         *cloudflared.Client
+	mu                 sync.Mutex
+	runs               map[int]tunnelRuntime
+	runProvider        map[int]string
+	inflight           map[int]tunnelRuntime
+	starting           map[int]*model.Tunnel
+	publicLatency      map[int]*publicLatency
+	probeWG            sync.WaitGroup
+	knownURL           map[int]string
+	startWG            sync.WaitGroup
+	devStartCancel     map[*model.Tunnel]context.CancelFunc
 }
 
 func NewTunnelBiz(storage *conf.Storage) *TunnelBiz {
+	configDir := ""
+	if storage != nil {
+		configDir = filepath.Dir(storage.Path())
+	}
 	return &TunnelBiz{
-		storage: storage,
-		runs:    make(map[int]*forward.LocalForward),
+		storage:        storage,
+		frp:            &frp.Client{Store: &frp.Store{Path: filepath.Join(configDir, "frp-local.json")}},
+		dev:            devtunnel.NewClient(""),
+		cloudflare:     cloudflared.NewClient(""),
+		runs:           make(map[int]tunnelRuntime),
+		runProvider:    make(map[int]string),
+		inflight:       make(map[int]tunnelRuntime),
+		starting:       make(map[int]*model.Tunnel),
+		publicLatency:  make(map[int]*publicLatency),
+		knownURL:       make(map[int]string),
+		devStartCancel: make(map[*model.Tunnel]context.CancelFunc),
 	}
 }
 
@@ -41,40 +115,45 @@ func (b *TunnelBiz) List() ([]model.Tunnel, error) {
 	}
 
 	items := append([]model.Tunnel{}, cfg.Tunnels...)
-	b.attachRuntimeLatencies(items)
+	b.AttachRuntimeState(items)
 	return items, nil
 }
 
 func (b *TunnelBiz) Create(payload model.TunnelPayload) (model.Tunnel, error) {
 	payload = normalizeTunnelPayload(payload)
+	if payload.Provider == model.ProviderCloudflare {
+		b.cloudflareAuthMu.Lock()
+		defer b.cloudflareAuthMu.Unlock()
+	}
+	if payload.Provider == model.ProviderFRP {
+		b.frpMu.Lock()
+		defer b.frpMu.Unlock()
+	}
 
 	var created model.Tunnel
 	_, err := b.storage.Update(func(cfg *conf.Config) error {
 		if err := validateTunnelPayload(payload); err != nil {
 			return err
 		}
-		if _, err := collectJumpers(cfg.Jumpers, payload.JumperIDs); err != nil {
-			return err
+		if payload.Provider == model.ProviderSSH {
+			if _, err := collectJumpers(cfg.Jumpers, payload.JumperIDs); err != nil {
+				return err
+			}
 		}
 		if err := validateGroupID(cfg.Groups, payload.GroupID); err != nil {
 			return err
 		}
-
-		created = model.Tunnel{
-			ID:          nextTunnelID(cfg.Tunnels),
-			Name:        payload.Name,
-			GroupID:     payload.GroupID,
-			Mode:        payload.Mode,
-			JumperIDs:   append([]int{}, payload.JumperIDs...),
-			LocalHost:   payload.LocalHost,
-			LocalPort:   payload.LocalPort,
-			RemoteHost:  payload.RemoteHost,
-			RemotePort:  payload.RemotePort,
-			AutoStart:   payload.AutoStart,
-			Status:      payload.Status,
-			LastError:   "",
-			Description: payload.Description,
+		if err := ensureDevTunnelIDAvailable(cfg.Tunnels, 0, payload); err != nil {
+			return err
 		}
+		if err := ensureCloudflareAvailable(cfg.Tunnels, 0, payload); err != nil {
+			return err
+		}
+
+		if err := b.validateFRPBinding(cfg.Tunnels, 0, payload); err != nil {
+			return err
+		}
+		created = tunnelFromPayload(nextTunnelID(cfg.Tunnels), payload, nil)
 		cfg.Tunnels = append(cfg.Tunnels, created)
 		return nil
 	})
@@ -94,14 +173,27 @@ func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, e
 	}
 
 	payload = normalizeTunnelPayload(payload)
+	if payload.Provider == model.ProviderCloudflare {
+		b.cloudflareAuthMu.Lock()
+		defer b.cloudflareAuthMu.Unlock()
+	}
+	if payload.Provider == model.ProviderFRP {
+		b.frpMu.Lock()
+		defer b.frpMu.Unlock()
+	}
 
 	var updated model.Tunnel
+	var previousTunnelID string
+	var previousCloudflareID string
+	var previousHostname string
 	_, err := b.storage.Update(func(cfg *conf.Config) error {
 		if err := validateTunnelPayload(payload); err != nil {
 			return err
 		}
-		if _, err := collectJumpers(cfg.Jumpers, payload.JumperIDs); err != nil {
-			return err
+		if payload.Provider == model.ProviderSSH {
+			if _, err := collectJumpers(cfg.Jumpers, payload.JumperIDs); err != nil {
+				return err
+			}
 		}
 		if err := validateGroupID(cfg.Groups, payload.GroupID); err != nil {
 			return err
@@ -117,27 +209,52 @@ func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, e
 		if idx == -1 {
 			return ErrTunnelNotFound
 		}
+		if cfg.Tunnels[idx].ProviderName() != payload.Provider {
+			return fmt.Errorf("provider cannot be changed")
+		}
+		if err := ensureDevTunnelIDAvailable(cfg.Tunnels, id, payload); err != nil {
+			return err
+		}
+		if err := ensureCloudflareAvailable(cfg.Tunnels, id, payload); err != nil {
+			return err
+		}
+		if cfg.Tunnels[idx].DevTunnel != nil {
+			previousTunnelID = cfg.Tunnels[idx].DevTunnel.TunnelID
+		}
+		if cfg.Tunnels[idx].Cloudflare != nil {
+			previousCloudflareID = cfg.Tunnels[idx].Cloudflare.TunnelID
+			previousHostname = cfg.Tunnels[idx].Cloudflare.Hostname
+		}
 
-		updated = model.Tunnel{
-			ID:          id,
-			Name:        payload.Name,
-			GroupID:     payload.GroupID,
-			Mode:        payload.Mode,
-			JumperIDs:   append([]int{}, payload.JumperIDs...),
-			LocalHost:   payload.LocalHost,
-			LocalPort:   payload.LocalPort,
-			RemoteHost:  payload.RemoteHost,
-			RemotePort:  payload.RemotePort,
-			AutoStart:   payload.AutoStart,
-			Status:      payload.Status,
-			LastError:   cfg.Tunnels[idx].LastError,
-			Description: payload.Description,
+		if err := b.validateFRPBinding(cfg.Tunnels, id, payload); err != nil {
+			return err
+		}
+		updated = tunnelFromPayload(id, payload, &cfg.Tunnels[idx])
+		if previousTunnelID != "" && updated.DevTunnel != nil && !devtunnel.SameTunnelID(previousTunnelID, updated.DevTunnel.TunnelID) {
+			return fmt.Errorf("tunnel id cannot be changed")
+		}
+		if previousCloudflareID != "" && updated.Cloudflare != nil && !cloudflared.SameTunnelID(previousCloudflareID, updated.Cloudflare.TunnelID) {
+			return fmt.Errorf("tunnel id cannot be changed")
 		}
 		cfg.Tunnels[idx] = updated
 		return nil
 	})
 	if err != nil {
 		return model.Tunnel{}, err
+	}
+	nextTunnelIDValue := ""
+	if updated.DevTunnel != nil {
+		nextTunnelIDValue = updated.DevTunnel.TunnelID
+	}
+	nextCloudflareID := ""
+	nextHostname := ""
+	if updated.Cloudflare != nil {
+		nextCloudflareID = updated.Cloudflare.TunnelID
+		nextHostname = updated.Cloudflare.Hostname
+	}
+	cloudflareIDChanged := (previousCloudflareID != "" || nextCloudflareID != "") && !cloudflared.SameTunnelID(previousCloudflareID, nextCloudflareID)
+	if !devtunnel.SameTunnelID(previousTunnelID, nextTunnelIDValue) || cloudflareIDChanged || previousHostname != nextHostname {
+		b.forgetURL(id)
 	}
 
 	return updated, nil
@@ -202,18 +319,21 @@ func (b *TunnelBiz) Delete(id int) error {
 		cfg.Tunnels = append(cfg.Tunnels[:idx], cfg.Tunnels[idx+1:]...)
 		return nil
 	})
+	if err == nil {
+		b.forgetURL(id)
+	}
 	return err
 }
 
 func (b *TunnelBiz) RunningCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return len(b.runs)
+	return len(b.runs) + len(b.starting)
 }
 
-// Toggle starts or stops a tunnel. maxRunning <= 0 means unlimited (Pro);
-// otherwise starting is blocked when RunningCount() >= maxRunning.
-func (b *TunnelBiz) Toggle(id int, maxRunning int) (model.Tunnel, error) {
+// Toggle starts or stops a tunnel. resolveMaxRunning is called only when starting.
+// A non-positive limit allows unlimited concurrent tunnels.
+func (b *TunnelBiz) Toggle(id int, resolveMaxRunning func() int) (model.Tunnel, error) {
 	if id <= 0 {
 		return model.Tunnel{}, fmt.Errorf("invalid tunnel id")
 	}
@@ -228,16 +348,27 @@ func (b *TunnelBiz) Toggle(id int, maxRunning int) (model.Tunnel, error) {
 		return model.Tunnel{}, ErrTunnelNotFound
 	}
 
-	if b.isRunning(id) || tunnel.Status == "running" {
+	if b.isRunning(id) {
 		slog.Info("tunnel toggle stop", "tunnel_id", tunnel.ID, "name", tunnel.Name)
 		if err := b.stopRuntime(id); err != nil {
 			return model.Tunnel{}, err
 		}
-		return b.updateStatus(id, "stopped", "")
+		manuallyStopped := true
+		return b.updateStatusWithIntent(id, "stopped", "", &manuallyStopped)
 	}
 
+	maxRunning := effectiveRunningLimit(resolveMaxRunning())
 	if maxRunning > 0 && b.RunningCount() >= maxRunning {
 		return model.Tunnel{}, fmt.Errorf("%w: limit %d", ErrFreePlanRunningLimit, maxRunning)
+	}
+	manuallyStopped := false
+	if _, err := b.updateStatusWithIntent(id, tunnel.Status, tunnel.LastError, &manuallyStopped); err != nil {
+		return model.Tunnel{}, err
+	}
+
+	switch tunnel.ProviderName() {
+	case model.ProviderDevTunnel, model.ProviderCloudflare, model.ProviderFRP:
+		return b.beginAsyncStart(tunnel, nil, maxRunning)
 	}
 
 	jumpers, err := collectJumpers(cfg.Jumpers, tunnel.JumperIDs)
@@ -252,32 +383,25 @@ func (b *TunnelBiz) Toggle(id int, maxRunning int) (model.Tunnel, error) {
 		msg := fmt.Sprintf("mode %s is not supported yet, only local, remote and dynamic forward are implemented", tunnel.Mode)
 		updated, statusErr := b.updateStatus(id, "error", msg)
 		if statusErr != nil {
-			return model.Tunnel{}, fmt.Errorf(msg)
+			return model.Tunnel{}, fmt.Errorf("%s", msg)
 		}
 		return updated, nil
 	}
-
-	if err := b.startRuntime(tunnel, jumpers); err != nil {
-		updated, statusErr := b.updateStatus(id, "error", errReason(err))
-		if statusErr != nil {
-			return model.Tunnel{}, fmt.Errorf("start tunnel failed: %v (persist status failed: %v)", err, statusErr)
-		}
-		return updated, nil
-	}
-
-	slog.Info("tunnel toggle start", "tunnel_id", tunnel.ID, "name", tunnel.Name)
-	updated, err := b.updateStatus(id, "running", "")
-	if err != nil {
-		_ = b.stopRuntime(id)
-		return model.Tunnel{}, err
-	}
-	return updated, nil
+	return b.beginAsyncStart(tunnel, jumpers, maxRunning)
 }
 
 func (b *TunnelBiz) TestConnection(payload model.TunnelPayload, inlineJumper *model.JumperPayload) (time.Duration, error) {
 	payload = normalizeTunnelPayload(payload)
 	if payload.Status == "" {
 		payload.Status = "stopped"
+	}
+	if payload.Provider == model.ProviderFRP {
+		started := time.Now()
+		err := probeLocalOrigin(payload.LocalHost, payload.LocalPort)
+		return time.Since(started), err
+	}
+	if payload.Provider == model.ProviderDevTunnel || payload.Provider == model.ProviderCloudflare {
+		return testDevTunnelLocal(payload)
 	}
 	allowEmptyJumpers := inlineJumper != nil
 	if err := validateTunnelPayloadWithOption(payload, !allowEmptyJumpers); err != nil {
@@ -335,29 +459,83 @@ func (b *TunnelBiz) TestConnection(payload model.TunnelPayload, inlineJumper *mo
 	return forward.TestTunnelConnection(t, chain)
 }
 
-func (b *TunnelBiz) attachRuntimeLatencies(items []model.Tunnel) {
+// AttachRuntimeState overlays live status on a detached configuration snapshot.
+func (b *TunnelBiz) AttachRuntimeState(items []model.Tunnel) {
 	if len(items) == 0 {
 		return
 	}
 
 	b.mu.Lock()
-	runs := make(map[int]*forward.LocalForward, len(b.runs))
+	starting := make(map[int]bool, len(b.starting))
+	for id := range b.starting {
+		starting[id] = true
+	}
+	runs := make(map[int]tunnelRuntime, len(b.runs))
 	for id, run := range b.runs {
 		runs[id] = run
+	}
+	known := make(map[int]string, len(b.knownURL))
+	for id, url := range b.knownURL {
+		known[id] = url
 	}
 	b.mu.Unlock()
 
 	for i := range items {
-		if items[i].Status != "running" {
+		if items[i].ProviderName() == model.ProviderFRP && items[i].FRP != nil {
+			if server, err := b.frp.Store.Server(items[i].FRP.ServerID); err == nil {
+				items[i].PublicURL = frp.Address(server, items[i].Mode, items[i].FRP.RemotePort, items[i].FRP.Domain)
+			}
+			if origin, ok := runs[items[i].ID].(interface{ OriginState() string }); ok {
+				items[i].OriginState = origin.OriginState()
+			}
+		}
+		if items[i].ProviderName() == model.ProviderDevTunnel && items[i].DevTunnel != nil {
+			items[i].PublicURL = items[i].DevTunnel.LastPublicURL
+			if known[items[i].ID] != "" {
+				items[i].PublicURL = known[items[i].ID]
+			}
+		}
+		if starting[items[i].ID] {
+			items[i].Status = "busy"
 			items[i].LatencyMs = 0
+			continue
+		}
+		if items[i].Status == "busy" {
+			if runs[items[i].ID] != nil {
+				items[i].Status = "running"
+			} else {
+				items[i].Status = "stopped"
+			}
+		}
+		if items[i].Status != "running" && items[i].Status != "reconnecting" {
+			items[i].LatencyMs = 0
+			if items[i].ProviderName() == model.ProviderCloudflare && items[i].Cloudflare != nil {
+				items[i].PublicURL = cloudflared.PublicURL(items[i].Cloudflare.Hostname)
+			}
 			continue
 		}
 		run, ok := runs[items[i].ID]
 		if !ok || run == nil {
+			// Persisted status can outlive the process that owned the listener.
+			items[i].Status = "stopped"
+			items[i].LastError = ""
 			items[i].LatencyMs = 0
 			continue
 		}
-		latency, hasLatency := run.LastLatency()
+		if source, ok := run.(urlRuntime); ok {
+			items[i].PublicURL = source.PublicURL()
+			b.rememberURL(items[i].ID, items[i].PublicURL)
+		}
+		if items[i].ProviderName() != model.ProviderSSH {
+			b.attachPublicLatency(&items[i], run)
+			continue
+		}
+		latencySource, ok := run.(latencyRuntime)
+		if !ok {
+			items[i].LatencyMs = 0
+			continue
+		}
+		latency, hasLatency := latencySource.LastLatency()
 		if !hasLatency || latency <= 0 {
 			items[i].LatencyMs = 0
 			continue
@@ -368,10 +546,11 @@ func (b *TunnelBiz) attachRuntimeLatencies(items []model.Tunnel) {
 
 func (b *TunnelBiz) TrafficSnapshot() (up, down uint64) {
 	b.mu.Lock()
-	runs := make([]*forward.LocalForward, 0, len(b.runs))
+	runs := make([]trafficRuntime, 0, len(b.runs))
 	for _, run := range b.runs {
-		if run != nil {
-			runs = append(runs, run)
+		source, ok := run.(trafficRuntime)
+		if ok && source != nil {
+			runs = append(runs, source)
 		}
 	}
 	b.mu.Unlock()
@@ -384,60 +563,144 @@ func (b *TunnelBiz) TrafficSnapshot() (up, down uint64) {
 	return up, down
 }
 
-// StartAutoStart starts tunnels marked autoStart. maxRunning <= 0 means unlimited
-// (Pro); otherwise only the first maxRunning auto-start tunnels are started.
-func (b *TunnelBiz) StartAutoStart(maxRunning int) error {
-	cfg, err := b.storage.Load()
+// StartAutoStart reserves eligible tunnels and starts connections in the background.
+// Callers serialize preparation with config mutations using App.configGate.
+// Non-positive maxRunning means unlimited. In-flight starts count toward positive limits.
+func (b *TunnelBiz) StartAutoStart(maxRunning int) error { return b.startSelected(maxRunning, nil) }
+func (b *TunnelBiz) StartPreviouslyRunning(ids []int, maxRunning int) error {
+	selected := map[int]bool{}
+	for _, id := range ids {
+		selected[id] = true
+	}
+	return b.startSelected(maxRunning, selected)
+}
+func (b *TunnelBiz) startSelected(maxRunning int, selected map[int]bool) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	limit := effectiveRunningLimit(maxRunning)
+	tasks := []*model.Tunnel{}
+	cfg, err := b.storage.UpdateRuntime(func(cfg *conf.Config) error {
+		for i := range cfg.Tunnels {
+			t := &cfg.Tunnels[i]
+			_, running := b.runs[t.ID]
+			_, starting := b.starting[t.ID]
+			if !running && !starting && (t.Status == "running" || t.Status == "busy" || t.Status == "reconnecting") {
+				t.Status = "stopped"
+				t.LastError = ""
+			}
+			eligible := t.AutoStart && !t.ManuallyStopped
+			if selected != nil {
+				eligible = selected[t.ID]
+			}
+			if running || starting || !eligible || b.cliChanging[t.ProviderName()] {
+				continue
+			}
+			if limit > 0 && len(b.runs)+len(b.starting)+len(tasks) >= limit {
+				continue
+			}
+			snapshot := *t
+			tasks = append(tasks, &snapshot)
+			t.Status = "busy"
+			t.LastError = ""
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-
-	autoStartTunnels := make([]model.Tunnel, 0, len(cfg.Tunnels))
-	for _, t := range cfg.Tunnels {
-		if !t.AutoStart {
-			continue
-		}
-		autoStartTunnels = append(autoStartTunnels, t)
+	for _, task := range tasks {
+		b.starting[task.ID] = task
+		b.startWG.Add(1)
+		go b.startAutoRuntime(task, cfg.Jumpers)
 	}
-
-	if maxRunning > 0 && len(autoStartTunnels) > maxRunning {
-		autoStartTunnels = autoStartTunnels[:maxRunning]
-	}
-
-	for _, t := range autoStartTunnels {
-		_, _ = b.updateStatus(t.ID, "busy", "")
-	}
-
-	var wg sync.WaitGroup
-	for _, tunnel := range autoStartTunnels {
-		t := tunnel
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if t.Mode != "local" && t.Mode != "remote" && t.Mode != "dynamic" {
-				_, _ = b.updateStatus(t.ID, "error", fmt.Sprintf("mode %s is not supported yet, only local, remote and dynamic forward are implemented", t.Mode))
-				return
-			}
-
-			jumpers, err := collectJumpers(cfg.Jumpers, t.JumperIDs)
-			if err != nil {
-				_, _ = b.updateStatus(t.ID, "error", "jumper not found")
-				return
-			}
-			if err := b.startRuntime(t, jumpers); err != nil {
-				_, _ = b.updateStatus(t.ID, "error", errReason(err))
-				return
-			}
-			_, _ = b.updateStatus(t.ID, "running", "")
-		}()
-	}
-	wg.Wait()
 	return nil
+}
+
+func (b *TunnelBiz) startAutoRuntime(task *model.Tunnel, jumpers []model.Jumper) {
+	defer b.startWG.Done()
+	b.mu.Lock()
+	active := b.starting[task.ID] == task
+	b.mu.Unlock()
+	if !active {
+		return
+	}
+	var run tunnelRuntime
+	var err error
+	switch task.ProviderName() {
+	case model.ProviderFRP:
+		run, err = b.newStartedFRPRuntime(task)
+	case model.ProviderDevTunnel:
+		run, err = b.newStartedDevRuntime(task)
+	case model.ProviderCloudflare:
+		run, err = b.newStartedCloudflareRuntime(task)
+	case model.ProviderSSH:
+		var chain []model.Jumper
+		chain, err = collectJumpers(jumpers, task.JumperIDs)
+		if err == nil {
+			run, err = b.newStartedRuntime(*task, chain)
+		}
+	default:
+		err = fmt.Errorf("unsupported provider: %s", task.ProviderName())
+	}
+	b.mu.Lock()
+	// A stop, deletion, or config replacement invalidates this reservation.
+	// A late connection must never restore the canceled tunnel's status.
+	if b.starting[task.ID] != task {
+		b.mu.Unlock()
+		if run != nil {
+			_ = run.Stop()
+		}
+		return
+	}
+	delete(b.starting, task.ID)
+	delete(b.inflight, task.ID)
+	if err != nil {
+		_, _ = b.updateStatus(task.ID, providerFailureStatus(err), errReason(err))
+		b.mu.Unlock()
+		return
+	}
+	b.runs[task.ID] = run
+	b.runProvider[task.ID] = task.ProviderName()
+	if source, ok := run.(urlRuntime); ok {
+		b.knownURL[task.ID] = source.PublicURL()
+	}
+	_, statusErr := b.updateStatus(task.ID, "running", "")
+	if statusErr != nil {
+		delete(b.runs, task.ID)
+		delete(b.runProvider, task.ID)
+	}
+	b.mu.Unlock()
+	if statusErr == nil && task.ProviderName() == model.ProviderDevTunnel {
+		if source, ok := run.(urlRuntime); ok {
+			if _, cacheErr := b.storage.Update(func(cfg *conf.Config) error {
+				for i := range cfg.Tunnels {
+					t := &cfg.Tunnels[i]
+					if t.ID == task.ID && t.DevTunnel != nil && task.DevTunnel != nil && devtunnel.SameTunnelID(t.DevTunnel.TunnelID, task.DevTunnel.TunnelID) {
+						t.DevTunnel.LastPublicURL = strings.TrimSpace(source.PublicURL())
+					}
+				}
+				return nil
+			}); cacheErr != nil {
+				slog.Warn("cache dev tunnel public URL failed", "tunnel_id", task.ID, "err", cacheErr)
+			}
+		}
+	}
+	if statusErr != nil {
+		_ = run.Stop()
+		slog.Error("persist auto-start status failed", "tunnel_id", task.ID, "err", statusErr)
+		return
+	}
+	slog.Info("tunnel runtime started", "tunnel_id", task.ID, "name", task.Name)
+	b.startPublicLatency(*task, run)
+	go b.watchRuntime(task.ID, run)
 }
 
 func (b *TunnelBiz) Shutdown() {
 	b.mu.Lock()
-	ids := make([]int, 0, len(b.runs))
+	ids := make([]int, 0, len(b.runs)+len(b.starting))
+	for id := range b.starting {
+		ids = append(ids, id)
+	}
 	for id := range b.runs {
 		ids = append(ids, id)
 	}
@@ -447,37 +710,58 @@ func (b *TunnelBiz) Shutdown() {
 		_ = b.stopRuntime(id)
 		_, _ = b.updateStatus(id, "stopped", "")
 	}
+	b.startWG.Wait()
+	b.probeWG.Wait()
 }
 
-func (b *TunnelBiz) startRuntime(t model.Tunnel, jumpers []model.Jumper) error {
+func (b *TunnelBiz) beginAsyncStart(tunnel model.Tunnel, jumpers []model.Jumper, maxRunning int) (model.Tunnel, error) {
 	b.mu.Lock()
-	if _, ok := b.runs[t.ID]; ok {
+	if b.cliChanging[tunnel.ProviderName()] {
 		b.mu.Unlock()
-		return nil
+		return model.Tunnel{}, fmt.Errorf("CLI version maintenance is in progress")
 	}
+	if _, ok := b.runs[tunnel.ID]; ok || b.starting[tunnel.ID] != nil {
+		b.mu.Unlock()
+		return tunnel, nil
+	}
+	if maxRunning > 0 && len(b.runs)+len(b.starting) >= maxRunning {
+		b.mu.Unlock()
+		return model.Tunnel{}, fmt.Errorf("%w: limit %d", ErrFreePlanRunningLimit, maxRunning)
+	}
+	task := tunnel
+	b.starting[tunnel.ID] = &task
+	b.startWG.Add(1)
 	b.mu.Unlock()
 
+	updated, err := b.updateStatus(tunnel.ID, "busy", "")
+	if err != nil {
+		b.mu.Lock()
+		if b.starting[tunnel.ID] == &task {
+			delete(b.starting, tunnel.ID)
+		}
+		b.mu.Unlock()
+		b.startWG.Done()
+		return model.Tunnel{}, err
+	}
+	go b.startAutoRuntime(&task, jumpers)
+	return updated, nil
+}
+
+func (b *TunnelBiz) newStartedRuntime(t model.Tunnel, jumpers []model.Jumper) (tunnelRuntime, error) {
+	for _, j := range jumpers {
+		if j.NeedsCredentials {
+			return nil, fmt.Errorf("jumper %s requires local authentication setup", j.Name)
+		}
+	}
 	run := forward.NewLocalForward(t, jumpers)
 	if err := run.Start(); err != nil {
 		slog.Error("tunnel runtime start failed", "tunnel_id", t.ID, "name", t.Name, "err", err)
-		return err
+		return nil, err
 	}
-
-	b.mu.Lock()
-	if _, ok := b.runs[t.ID]; ok {
-		b.mu.Unlock()
-		_ = run.Stop()
-		return nil
-	}
-	b.runs[t.ID] = run
-	b.mu.Unlock()
-	slog.Info("tunnel runtime started", "tunnel_id", t.ID, "name", t.Name)
-
-	go b.watchRuntime(t.ID, run)
-	return nil
+	return run, nil
 }
 
-func (b *TunnelBiz) watchRuntime(id int, run *forward.LocalForward) {
+func (b *TunnelBiz) watchRuntime(id int, run tunnelRuntime) {
 	done := run.Done()
 	if done == nil {
 		return
@@ -493,8 +777,9 @@ func (b *TunnelBiz) watchRuntime(id int, run *forward.LocalForward) {
 				b.mu.Unlock()
 				return
 			}
+			b.cancelPublicLatency(id)
 			delete(b.runs, id)
-			b.mu.Unlock()
+			delete(b.runProvider, id)
 
 			if run.Err() != nil {
 				slog.Warn("tunnel runtime exited with error", "tunnel_id", id, "err", run.Err())
@@ -502,6 +787,7 @@ func (b *TunnelBiz) watchRuntime(id int, run *forward.LocalForward) {
 			} else {
 				slog.Info("tunnel runtime exited", "tunnel_id", id)
 			}
+			b.mu.Unlock()
 			return
 		case evt, ok := <-events:
 			if !ok {
@@ -510,31 +796,48 @@ func (b *TunnelBiz) watchRuntime(id int, run *forward.LocalForward) {
 			}
 			b.mu.Lock()
 			active, stillRunning := b.runs[id]
-			b.mu.Unlock()
 			if !stillRunning || active != run {
+				b.mu.Unlock()
 				continue
 			}
 			switch evt.Type {
 			case forward.RuntimeEventDisconnected:
 				slog.Warn("tunnel runtime disconnected", "tunnel_id", id, "err", evt.Err)
-				_, _ = b.updateStatus(id, "error", errReason(evt.Err))
+				status := "error"
+				if b.runProvider[id] == model.ProviderFRP {
+					status = "reconnecting"
+				}
+				_, _ = b.updateStatus(id, status, errReason(evt.Err))
 			case forward.RuntimeEventReconnected:
 				slog.Info("tunnel runtime reconnected", "tunnel_id", id)
 				_, _ = b.updateStatus(id, "running", "")
 			}
+			b.mu.Unlock()
 		}
 	}
 }
 
 func (b *TunnelBiz) stopRuntime(id int) error {
 	b.mu.Lock()
+	cancel := b.devStartCancel[b.starting[id]]
+	delete(b.starting, id)
+	inflight := b.inflight[id]
+	delete(b.inflight, id)
 	run, ok := b.runs[id]
 	if ok {
+		b.cancelPublicLatency(id)
 		delete(b.runs, id)
+		delete(b.runProvider, id)
 	}
 	b.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 
-	if !ok {
+	if inflight != nil && inflight != run {
+		_ = inflight.Stop()
+	}
+	if !ok || run == nil {
 		return nil
 	}
 	return run.Stop()
@@ -544,12 +847,22 @@ func (b *TunnelBiz) isRunning(id int) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	_, ok := b.runs[id]
-	return ok
+	_, starting := b.starting[id]
+	return ok || starting
 }
 
 func (b *TunnelBiz) updateStatus(id int, status, lastError string) (model.Tunnel, error) {
+	return b.updateStatusWithIntent(id, status, lastError, nil)
+}
+
+// A nil intent preserves the user's choice during internal lifecycle changes.
+func (b *TunnelBiz) updateStatusWithIntent(id int, status, lastError string, manuallyStopped *bool) (model.Tunnel, error) {
 	var updated model.Tunnel
-	_, err := b.storage.Update(func(cfg *conf.Config) error {
+	update := b.storage.UpdateRuntime
+	if manuallyStopped != nil {
+		update = b.storage.Update
+	}
+	_, err := update(func(cfg *conf.Config) error {
 		idx := -1
 		for i := range cfg.Tunnels {
 			if cfg.Tunnels[i].ID == id {
@@ -562,6 +875,9 @@ func (b *TunnelBiz) updateStatus(id int, status, lastError string) (model.Tunnel
 		}
 		cfg.Tunnels[idx].Status = status
 		cfg.Tunnels[idx].LastError = strings.TrimSpace(lastError)
+		if manuallyStopped != nil {
+			cfg.Tunnels[idx].ManuallyStopped = *manuallyStopped
+		}
 		updated = cfg.Tunnels[idx]
 		return nil
 	})
@@ -585,6 +901,7 @@ func errReason(err error) string {
 
 func normalizeTunnelPayload(payload model.TunnelPayload) model.TunnelPayload {
 	payload.Name = strings.TrimSpace(payload.Name)
+	payload.Provider = strings.TrimSpace(payload.Provider)
 	payload.Mode = strings.TrimSpace(payload.Mode)
 	payload.LocalHost = strings.TrimSpace(payload.LocalHost)
 	payload.RemoteHost = strings.TrimSpace(payload.RemoteHost)
@@ -594,9 +911,8 @@ func normalizeTunnelPayload(payload model.TunnelPayload) model.TunnelPayload {
 	if payload.GroupID < 0 {
 		payload.GroupID = 0
 	}
-
-	if payload.Mode == "" {
-		payload.Mode = "local"
+	if payload.Provider == "" {
+		payload.Provider = model.ProviderSSH
 	}
 	if payload.Status == "" {
 		payload.Status = "stopped"
@@ -604,7 +920,93 @@ func normalizeTunnelPayload(payload model.TunnelPayload) model.TunnelPayload {
 	if payload.LocalHost == "" {
 		payload.LocalHost = "127.0.0.1"
 	}
+	if payload.Provider == model.ProviderFRP {
+		payload.JumperIDs = nil
+		payload.DevTunnel = nil
+		payload.Cloudflare = nil
+		payload.RemoteHost = ""
+		payload.RemotePort = 0
+		if payload.FRP != nil {
+			copied := *payload.FRP
+			payload.FRP = &copied
+			payload.FRP.ServerID = strings.TrimSpace(payload.FRP.ServerID)
+			payload.FRP.ProxyName = strings.TrimSpace(payload.FRP.ProxyName)
+			payload.FRP.Domain = frp.DomainName(payload.FRP.Domain)
+		}
+		return payload
+	}
+	payload.FRP = nil
+	if payload.Provider == model.ProviderDevTunnel {
+		payload.JumperIDs = nil
+		payload.RemoteHost = ""
+		payload.RemotePort = 0
+		if payload.Mode == "" {
+			payload.Mode = "http"
+		}
+		if payload.DevTunnel == nil {
+			payload.DevTunnel = &model.DevTunnelConfig{}
+		}
+		payload.DevTunnel.LocalHost = payload.LocalHost
+		payload.DevTunnel.LocalPort = payload.LocalPort
+		payload.DevTunnel.Protocol = payload.Mode
+		payload.DevTunnel.Access = strings.TrimSpace(payload.DevTunnel.Access)
+		if payload.DevTunnel.Access == "" {
+			payload.DevTunnel.Access = "private"
+		}
+		expiration, err := devtunnel.NormalizeExpiration(payload.DevTunnel.Expiration)
+		if err == nil {
+			payload.DevTunnel.Expiration = expiration
+		}
+		region, regionErr := devtunnel.NormalizeRegion(payload.DevTunnel.Region)
+		if regionErr == nil {
+			payload.DevTunnel.Region = region
+		}
+		payload.DevTunnel.TunnelID = strings.TrimSpace(payload.DevTunnel.TunnelID)
+		payload.DevTunnel.Account = strings.TrimSpace(payload.DevTunnel.Account)
+		payload.DevTunnelIDMode = strings.ToLower(strings.TrimSpace(payload.DevTunnelIDMode))
+		if payload.DevTunnelIDMode == "auto" {
+			payload.DevTunnel.TunnelID = ""
+		}
+		if payload.DevTunnelIDMode == "bind" {
+			payload.DevTunnel.Region = ""
+		}
+		payload.Cloudflare = nil
+		return payload
+	}
+	if payload.Provider == model.ProviderCloudflare {
+		payload.JumperIDs = nil
+		payload.RemoteHost = ""
+		payload.RemotePort = 0
+		payload.DevTunnel = nil
+		if payload.Mode == "" {
+			payload.Mode = "http"
+		}
+		if payload.Cloudflare == nil {
+			payload.Cloudflare = &model.CloudflareTunnelConfig{}
+		}
+		payload.Cloudflare.LocalHost = payload.LocalHost
+		payload.Cloudflare.LocalPort = payload.LocalPort
+		payload.Cloudflare.Protocol = payload.Mode
+		payload.Cloudflare.TunnelID = strings.TrimSpace(payload.Cloudflare.TunnelID)
+		payload.Cloudflare.TunnelName = strings.TrimSpace(payload.Cloudflare.TunnelName)
+		if host, err := cloudflared.NormalizeHostname(payload.Cloudflare.Hostname); err == nil {
+			payload.Cloudflare.Hostname = host
+		} else {
+			payload.Cloudflare.Hostname = strings.TrimSpace(payload.Cloudflare.Hostname)
+		}
+		payload.CloudflareIDMode = strings.ToLower(strings.TrimSpace(payload.CloudflareIDMode))
+		if payload.CloudflareIDMode == "auto" {
+			payload.Cloudflare.TunnelID = ""
+		}
+		return payload
+	}
 
+	payload.Provider = model.ProviderSSH
+	payload.DevTunnel = nil
+	payload.Cloudflare = nil
+	if payload.Mode == "" {
+		payload.Mode = "local"
+	}
 	return payload
 }
 
@@ -616,14 +1018,31 @@ func validateTunnelPayloadWithOption(payload model.TunnelPayload, requireJumpers
 	if payload.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if requireJumpers && len(payload.JumperIDs) == 0 {
-		return fmt.Errorf("jumperIds is required")
-	}
 	if payload.LocalHost == "" {
 		return fmt.Errorf("localHost is required")
 	}
 	if payload.LocalPort < 1 || payload.LocalPort > 65535 {
 		return fmt.Errorf("localPort must be between 1 and 65535")
+	}
+	switch payload.Status {
+	case "running", "stopped", "error", "needs_setup", "auth_required", "reconnecting":
+	default:
+		return fmt.Errorf("unsupported status: %s", payload.Status)
+	}
+	if payload.Provider == model.ProviderFRP {
+		return validateFRPPayload(payload)
+	}
+	if payload.Provider == model.ProviderDevTunnel {
+		return validateDevTunnelPayload(payload)
+	}
+	if payload.Provider == model.ProviderCloudflare {
+		return validateCloudflareTunnelPayload(payload)
+	}
+	if payload.Provider != model.ProviderSSH {
+		return fmt.Errorf("unsupported provider: %s", payload.Provider)
+	}
+	if requireJumpers && len(payload.JumperIDs) == 0 {
+		return fmt.Errorf("jumperIds is required")
 	}
 	switch payload.Mode {
 	case "local", "remote", "dynamic":
@@ -637,11 +1056,6 @@ func validateTunnelPayloadWithOption(payload model.TunnelPayload, requireJumpers
 		if payload.RemotePort < 1 || payload.RemotePort > 65535 {
 			return fmt.Errorf("remotePort must be between 1 and 65535")
 		}
-	}
-	switch payload.Status {
-	case "running", "stopped", "error":
-	default:
-		return fmt.Errorf("unsupported status: %s", payload.Status)
 	}
 	return nil
 }
@@ -706,4 +1120,564 @@ func nextTunnelID(items []model.Tunnel) int {
 		}
 	}
 	return next
+}
+
+// RunningIDs captures the actual runtime set for rollback, not persisted status.
+func (b *TunnelBiz) RunningIDs() []int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ids := []int{}
+	for id := range b.starting {
+		ids = append(ids, id)
+	}
+	for id := range b.runs {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func effectiveRunningLimit(maxRunning int) int {
+	if maxRunning < 0 {
+		return 0
+	}
+	return maxRunning
+}
+
+func providerFailureStatus(err error) string {
+	if errors.Is(err, cloudflared.ErrNotInstalled) || errors.Is(err, cloudflared.ErrCredentialMissing) {
+		return "needs_setup"
+	}
+	if errors.Is(err, cloudflared.ErrAuthRequired) {
+		return "auth_required"
+	}
+	text := strings.ToLower(errReason(err))
+	switch {
+	case strings.Contains(text, "not installed"), strings.Contains(text, "credentials are missing"):
+		return "needs_setup"
+	case strings.Contains(text, "login expired"), strings.Contains(text, "not signed"), strings.Contains(text, "authentication is required"):
+		return "auth_required"
+	default:
+		return "error"
+	}
+}
+
+func (b *TunnelBiz) DevTunnelStatus(ctx context.Context) (devtunnel.Status, error) {
+	status, err := b.dev.Inspect(ctx)
+	if err == nil {
+		b.rememberDevAccount(status)
+	}
+	return status, err
+}
+
+func (b *TunnelBiz) ListDevTunnelResources(ctx context.Context) devtunnel.ResourceList {
+	return b.dev.ListResources(ctx)
+}
+
+func (b *TunnelBiz) LoadDevTunnelRegions(ctx context.Context, measure, force bool) devtunnel.RegionProbe {
+	return b.dev.LoadRegions(ctx, measure, force)
+}
+
+func (b *TunnelBiz) GetDevTunnelResource(ctx context.Context, id string) devtunnel.ResourceDetail {
+	return b.dev.GetResource(ctx, id)
+}
+
+func (b *TunnelBiz) CreateDevTunnelResource(ctx context.Context, input devtunnel.CreateResourceInput) devtunnel.ResourceDetail {
+	result := b.dev.CreateResource(ctx, input)
+	if result.State == devtunnel.ResourceReady {
+		b.updateDevResourceCache(result.Resource, false)
+	}
+	return result
+}
+
+func (b *TunnelBiz) StartDevTunnelLogin(kind string, progress func(phase, url string), done func()) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.cliChanging[model.ProviderDevTunnel] {
+		return fmt.Errorf("CLI version maintenance is in progress")
+	}
+	return b.dev.StartLogin(kind, progress, done)
+}
+
+func (b *TunnelBiz) CancelDevTunnelLogin() {
+	b.dev.CancelLogin()
+}
+
+func (b *TunnelBiz) LogoutDevTunnel(ctx context.Context) error {
+	b.mu.Lock()
+	for _, provider := range b.runProvider {
+		if provider == model.ProviderDevTunnel {
+			b.mu.Unlock()
+			return fmt.Errorf("stop Dev Tunnel connections before signing out")
+		}
+	}
+	for _, task := range b.starting {
+		if task != nil && task.ProviderName() == model.ProviderDevTunnel {
+			b.mu.Unlock()
+			return fmt.Errorf("stop Dev Tunnel connections before signing out")
+		}
+	}
+	b.mu.Unlock()
+	err := b.dev.Logout(ctx)
+	if err == nil {
+		b.rememberDevAccount(devtunnel.Status{AccountState: "signed_out"})
+	}
+	return err
+}
+
+func (b *TunnelBiz) InstallDevTunnelCLI(ctx context.Context) error {
+	return b.installManagedCLI(ctx, model.ProviderDevTunnel)
+}
+func (b *TunnelBiz) CancelDevTunnelInstall() {
+	b.CancelCLIUpdate(model.ProviderDevTunnel)
+	b.dev.CancelInstall()
+}
+
+func (b *TunnelBiz) newStartedDevRuntime(task *model.Tunnel) (tunnelRuntime, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	b.mu.Lock()
+	if b.starting[task.ID] != task {
+		b.mu.Unlock()
+		return nil, context.Canceled
+	}
+	b.devStartCancel[task] = cancel
+	b.mu.Unlock()
+	defer func() { b.mu.Lock(); delete(b.devStartCancel, task); b.mu.Unlock() }()
+	if err := b.dev.Preflight(ctx); err != nil {
+		return nil, err
+	}
+	cfg := task.DevTunnel
+	if cfg == nil {
+		cfg = &model.DevTunnelConfig{Access: "private", Expiration: "30d", Protocol: task.Mode}
+		task.DevTunnel = cfg
+	}
+	port := cfg.LocalPort
+	if port == 0 {
+		port = task.LocalPort
+	}
+	protocol := cfg.Protocol
+	if protocol == "" {
+		protocol = task.Mode
+	}
+	id := strings.TrimSpace(cfg.TunnelID)
+	if id != "" && !devtunnel.ValidTunnelID(id) {
+		return nil, fmt.Errorf("invalid dev tunnel id")
+	}
+	if id != "" && b.devTunnelServiceBoundElsewhere(task.ID, id, task.LocalHost, port) {
+		return nil, fmt.Errorf("dev tunnel service is already configured for this Tunnel ID")
+	}
+	if id == "" {
+		expiration, err := devtunnel.NormalizeExpiration(cfg.Expiration)
+		if err != nil {
+			return nil, err
+		}
+		id, err = b.dev.CreatePersistent(ctx, cfg.Access == "public", expiration, cfg.Region)
+		if err != nil {
+			return nil, err
+		}
+		if b.startCanceled(task.ID) {
+			_ = b.dev.DeleteRemote(context.Background(), id)
+			return nil, fmt.Errorf("dev tunnel start canceled")
+		}
+		account := ""
+		if status, statusErr := b.dev.Inspect(ctx); statusErr == nil {
+			account = status.AccountLabel
+			b.rememberDevAccount(status)
+		}
+		if err := b.persistDevTunnelID(task.ID, id, account); err != nil {
+			_ = b.dev.DeleteRemote(context.Background(), id)
+			return nil, err
+		}
+		cfg.TunnelID = id
+		publishedPort, err := b.allocateDevTunnelPort(task.ID, id, task.LocalHost, port)
+		if err != nil {
+			return nil, err
+		}
+		cfg.TunnelPort = publishedPort
+		if err := b.dev.EnsurePort(ctx, id, publishedPort, protocol); err != nil {
+			return nil, err
+		}
+		b.updateDevResourceCache(devtunnel.Resource{ID: id, Access: cfg.Access, Expiration: expiration, PortsKnown: true, Ports: []devtunnel.Port{{Number: cfg.TunnelPort, Protocol: protocol}}}, false)
+	} else if err := b.prepareExistingDevTunnel(ctx, task.ID, cfg, id, port, protocol); err != nil {
+		return nil, err
+	} else {
+		id = strings.TrimSpace(cfg.TunnelID)
+	}
+	if b.devTunnelServiceBoundElsewhere(task.ID, id, task.LocalHost, port) {
+		return nil, fmt.Errorf("dev tunnel service is already configured for this Tunnel ID")
+	}
+	targetHost := cfg.LocalHost
+	if targetHost == "" {
+		targetHost = task.LocalHost
+	}
+	runtime := &devServiceRuntime{biz: b, key: strings.ToLower(id), id: task.ID, target: devtunnel.ServiceTarget{Host: targetHost, Port: cfg.TunnelPort, LocalPort: port}, done: make(chan struct{}), events: make(chan forward.RuntimeEvent, 16)}
+	b.mu.Lock()
+	if b.starting[task.ID] != task {
+		b.mu.Unlock()
+		return nil, fmt.Errorf("dev tunnel start canceled")
+	}
+	b.inflight[task.ID] = runtime
+	b.mu.Unlock()
+	if err := b.startDevService(ctx, runtime); err != nil {
+		b.mu.Lock()
+		delete(b.inflight, task.ID)
+		b.mu.Unlock()
+		return nil, err
+	}
+	return runtime, nil
+}
+
+func (b *TunnelBiz) prepareExistingDevTunnel(ctx context.Context, selfID int, cfg *model.DevTunnelConfig, id string, port int, protocol string) error {
+	detail := b.dev.GetResource(ctx, id)
+	if detail.State != devtunnel.ResourceReady {
+		return devTunnelResourceError(detail)
+	}
+	qualified := strings.TrimSpace(detail.Resource.ID)
+	if qualified != "" && devtunnel.ValidTunnelID(qualified) && qualified != id {
+		if err := b.persistDevTunnelID(selfID, qualified, ""); err != nil {
+			return err
+		}
+		cfg.TunnelID = qualified
+		id = qualified
+	}
+
+	publishedPort, err := b.allocateDevTunnelPort(selfID, id, cfg.LocalHost, port)
+	if err != nil {
+		return err
+	}
+	cfg.TunnelPort = publishedPort
+	port = publishedPort
+	switch err := devtunnel.MatchPort(detail.Resource, port, protocol); {
+	case err == nil:
+		b.updateDevResourceCache(detail.Resource, false)
+		return nil
+	case errors.Is(err, devtunnel.ErrNoPorts):
+		if err := b.dev.EnsurePort(ctx, id, port, protocol); err != nil {
+			return err
+		}
+		detail.Resource.PortsKnown = true
+		detail.Resource.Ports = append(detail.Resource.Ports, devtunnel.Port{Number: port, Protocol: protocol})
+		b.updateDevResourceCache(detail.Resource, false)
+		return nil
+	default:
+		return err
+	}
+}
+
+func (b *TunnelBiz) startCanceled(id int) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.starting[id]
+	return !ok
+}
+
+func (b *TunnelBiz) devTunnelServiceBoundElsewhere(selfID int, tunnelID, host string, port int) bool {
+	if strings.TrimSpace(tunnelID) == "" {
+		return false
+	}
+	cfg, err := b.storage.Load()
+	if err != nil {
+		return true
+	}
+	for _, item := range cfg.Tunnels {
+		if item.ID == selfID || item.ProviderName() != model.ProviderDevTunnel || item.DevTunnel == nil {
+			continue
+		}
+		if devtunnel.SameTunnelID(item.DevTunnel.TunnelID, tunnelID) && sameServiceAddress(item.LocalHost, item.LocalPort, host, port) {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *TunnelBiz) persistDevTunnelID(id int, tunnelID, account string) error {
+	_, err := b.storage.Update(func(cfg *conf.Config) error {
+		for i := range cfg.Tunnels {
+			if cfg.Tunnels[i].ID != id {
+				continue
+			}
+			if cfg.Tunnels[i].DevTunnel == nil {
+				cfg.Tunnels[i].DevTunnel = &model.DevTunnelConfig{}
+			}
+			cfg.Tunnels[i].DevTunnel.TunnelID = tunnelID
+			if account != "" {
+				cfg.Tunnels[i].DevTunnel.Account = account
+			}
+			return nil
+		}
+		return ErrTunnelNotFound
+	})
+	return err
+}
+
+func (b *TunnelBiz) rememberURL(id int, url string) {
+	url = strings.TrimSpace(url)
+	if id <= 0 || url == "" {
+		return
+	}
+	b.mu.Lock()
+	b.knownURL[id] = url
+	b.mu.Unlock()
+}
+
+func (b *TunnelBiz) forgetURL(id int) {
+	b.mu.Lock()
+	delete(b.knownURL, id)
+	b.mu.Unlock()
+}
+
+func ensureDevTunnelIDAvailable(tunnels []model.Tunnel, selfID int, payload model.TunnelPayload) error {
+	if payload.Provider != model.ProviderDevTunnel || payload.DevTunnel == nil {
+		return nil
+	}
+	id := strings.TrimSpace(payload.DevTunnel.TunnelID)
+	if id == "" {
+		return nil
+	}
+	for _, item := range tunnels {
+		if item.ID == selfID || item.ProviderName() != model.ProviderDevTunnel || item.DevTunnel == nil {
+			continue
+		}
+		if devtunnel.SameTunnelID(item.DevTunnel.TunnelID, id) && sameServiceAddress(item.LocalHost, item.LocalPort, payload.LocalHost, payload.LocalPort) {
+			return fmt.Errorf("dev tunnel service %s is already used by %s (protocol does not distinguish services)", net.JoinHostPort(payload.LocalHost, strconv.Itoa(payload.LocalPort)), item.Name)
+		}
+	}
+	return nil
+}
+
+func devTunnelResourceError(detail devtunnel.ResourceDetail) error {
+	switch detail.State {
+	case devtunnel.ResourceAuth:
+		return fmt.Errorf("dev tunnel login expired")
+	case devtunnel.ResourceNotFound:
+		return fmt.Errorf("dev tunnel was not found")
+	case devtunnel.ResourceUnavailable:
+		return fmt.Errorf("dev tunnel cli is not installed")
+	case devtunnel.ResourcePermission:
+		return fmt.Errorf("dev tunnel permission denied")
+	case devtunnel.ResourceNetwork:
+		if detail.Detail != "" {
+			return fmt.Errorf("dev tunnel query failed: %s", detail.Detail)
+		}
+		return fmt.Errorf("dev tunnel query failed")
+	default:
+		if detail.Detail != "" {
+			return fmt.Errorf("dev tunnel query failed: %s", detail.Detail)
+		}
+		return fmt.Errorf("dev tunnel query failed")
+	}
+}
+
+// DeleteDevTunnelResource removes a Microsoft tunnel that no local tunnel still references.
+func (b *TunnelBiz) DeleteDevTunnelResource(ctx context.Context, id string) devtunnel.DeleteResourceResult {
+	id = strings.TrimSpace(id)
+	if !devtunnel.ValidTunnelID(id) {
+		return devtunnel.DeleteResourceResult{State: devtunnel.ResourceError, Detail: "invalid dev tunnel id"}
+	}
+	cfg, err := b.storage.Load()
+	if err != nil {
+		return devtunnel.DeleteResourceResult{State: devtunnel.ResourceError, Detail: err.Error()}
+	}
+	for _, item := range cfg.Tunnels {
+		if item.ProviderName() != model.ProviderDevTunnel || item.DevTunnel == nil {
+			continue
+		}
+		if !devtunnel.SameTunnelID(item.DevTunnel.TunnelID, id) {
+			continue
+		}
+		if b.isRunning(item.ID) {
+			return devtunnel.DeleteResourceResult{State: "running", Detail: "stop the tunnel and remove the binding first", TunnelName: item.Name}
+		}
+		return devtunnel.DeleteResourceResult{State: "linked", Detail: "remove the local tunnel binding first", TunnelName: item.Name}
+	}
+	detail := b.dev.GetResource(ctx, id)
+	if detail.State != devtunnel.ResourceReady {
+		return devtunnel.DeleteResourceResult{State: detail.State, Detail: detail.Detail}
+	}
+	target := detail.Resource.ID
+	if !devtunnel.ValidTunnelID(target) {
+		target = id
+	}
+	if err := b.dev.DeleteRemote(ctx, target); err != nil {
+		state, message := devTunnelFailureKind(err)
+		return devtunnel.DeleteResourceResult{State: state, Detail: message}
+	}
+	b.updateDevResourceCache(devtunnel.Resource{ID: target}, true)
+	return devtunnel.DeleteResourceResult{State: "deleted"}
+}
+
+func devTunnelFailureKind(err error) (string, string) {
+	text := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(text)
+	switch {
+	case strings.Contains(lower, "login"), strings.Contains(lower, "not signed"):
+		return devtunnel.ResourceAuth, text
+	case strings.Contains(lower, "not found"):
+		return devtunnel.ResourceNotFound, text
+	case strings.Contains(lower, "permission"), strings.Contains(lower, "forbidden"):
+		return devtunnel.ResourcePermission, text
+	case strings.Contains(lower, "timeout"), strings.Contains(lower, "network"):
+		return devtunnel.ResourceNetwork, text
+	default:
+		return devtunnel.ResourceError, text
+	}
+}
+
+func testDevTunnelLocal(payload model.TunnelPayload) (time.Duration, error) {
+	if err := validateTunnelPayload(payload); err != nil {
+		return 0, err
+	}
+	started := time.Now()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(payload.LocalHost, strconv.Itoa(payload.LocalPort)), 3*time.Second)
+	if err != nil {
+		return 0, fmt.Errorf("target service is not accepting connections: %w", err)
+	}
+	_ = conn.Close()
+	return time.Since(started), nil
+}
+
+func validateDevTunnelPayload(payload model.TunnelPayload) error {
+	if !devtunnel.ValidTargetHost(payload.LocalHost) {
+		return fmt.Errorf("invalid target host: expected an IPv4 address, IPv6 address, or hostname")
+	}
+	switch payload.Mode {
+	case "http", "https", "auto":
+	default:
+		return fmt.Errorf("unsupported dev tunnel protocol: %s", payload.Mode)
+	}
+	access := "private"
+	if payload.DevTunnel != nil && payload.DevTunnel.Access != "" {
+		access = payload.DevTunnel.Access
+	}
+	if access != "private" && access != "public" {
+		return fmt.Errorf("unsupported dev tunnel access: %s", access)
+	}
+	expiration := ""
+	if payload.DevTunnel != nil {
+		expiration = payload.DevTunnel.Expiration
+	}
+	if _, err := devtunnel.NormalizeExpiration(expiration); err != nil {
+		return err
+	}
+	region := ""
+	if payload.DevTunnel != nil {
+		region = payload.DevTunnel.Region
+	}
+	if _, err := devtunnel.NormalizeRegion(region); err != nil {
+		return err
+	}
+	switch payload.DevTunnelIDMode {
+	case "", "auto", "bind":
+	default:
+		return fmt.Errorf("unsupported dev tunnel id mode")
+	}
+	if payload.DevTunnelIDMode == "bind" {
+		if payload.DevTunnel == nil || strings.TrimSpace(payload.DevTunnel.TunnelID) == "" {
+			return fmt.Errorf("dev tunnel id is required")
+		}
+	}
+	if payload.DevTunnel != nil && payload.DevTunnel.TunnelID != "" && !devtunnel.ValidTunnelID(payload.DevTunnel.TunnelID) {
+		return fmt.Errorf("invalid dev tunnel id")
+	}
+	return nil
+}
+
+func tunnelFromPayload(id int, payload model.TunnelPayload, previous *model.Tunnel) model.Tunnel {
+	item := model.Tunnel{
+		ID:          id,
+		Name:        payload.Name,
+		Provider:    payload.Provider,
+		GroupID:     payload.GroupID,
+		Mode:        payload.Mode,
+		JumperIDs:   append([]int{}, payload.JumperIDs...),
+		LocalHost:   payload.LocalHost,
+		LocalPort:   payload.LocalPort,
+		RemoteHost:  payload.RemoteHost,
+		RemotePort:  payload.RemotePort,
+		AutoStart:   payload.AutoStart,
+		Status:      payload.Status,
+		Description: payload.Description,
+	}
+	if previous != nil {
+		item.ManuallyStopped = previous.ManuallyStopped
+		item.SyncID = previous.SyncID
+		item.LastError = previous.LastError
+	}
+	switch payload.Provider {
+	case model.ProviderFRP:
+		cfg := *payload.FRP
+		item.FRP = &cfg
+		item.JumperIDs = []int{}
+		return item
+	case model.ProviderDevTunnel:
+		item.JumperIDs = []int{}
+		item.RemoteHost = ""
+		item.RemotePort = 0
+		item.Cloudflare = nil
+		cfg := model.DevTunnelConfig{Access: "private", Expiration: "30d", Protocol: payload.Mode}
+		if payload.DevTunnel != nil {
+			cfg = *payload.DevTunnel
+		}
+		cfg.LocalHost = payload.LocalHost
+		cfg.LocalPort = payload.LocalPort
+		cfg.Protocol = payload.Mode
+		if cfg.Access == "" {
+			cfg.Access = "private"
+		}
+		if cfg.Expiration == "" {
+			cfg.Expiration = "30d"
+		}
+		switch payload.DevTunnelIDMode {
+		case "auto":
+			cfg.TunnelID = ""
+		case "bind":
+			cfg.TunnelID = strings.TrimSpace(cfg.TunnelID)
+		default:
+			if previous != nil && previous.DevTunnel != nil && cfg.TunnelID == "" {
+				cfg.TunnelID = previous.DevTunnel.TunnelID
+			}
+		}
+		cfg.LastPublicURL = ""
+		cfg.TunnelPort = 0
+		if previous != nil && previous.DevTunnel != nil && devtunnel.SameTunnelID(previous.DevTunnel.TunnelID, cfg.TunnelID) {
+			cfg.LastPublicURL = previous.DevTunnel.LastPublicURL
+			cfg.TunnelPort = previous.DevTunnel.TunnelPort
+		}
+		item.DevTunnel = &cfg
+		return item
+	case model.ProviderCloudflare:
+		item.JumperIDs = []int{}
+		item.RemoteHost = ""
+		item.RemotePort = 0
+		item.DevTunnel = nil
+		cfg := model.CloudflareTunnelConfig{Protocol: payload.Mode}
+		if payload.Cloudflare != nil {
+			cfg = *payload.Cloudflare
+		}
+		cfg.LocalHost = payload.LocalHost
+		cfg.LocalPort = payload.LocalPort
+		cfg.Protocol = payload.Mode
+		cfg.TunnelName = strings.TrimSpace(cfg.TunnelName)
+		cfg.TunnelID = strings.TrimSpace(cfg.TunnelID)
+		if host, err := cloudflared.NormalizeHostname(cfg.Hostname); err == nil {
+			cfg.Hostname = host
+		}
+		switch payload.CloudflareIDMode {
+		case "auto":
+			cfg.TunnelID = ""
+		case "bind":
+			cfg.TunnelID = strings.TrimSpace(cfg.TunnelID)
+		default:
+			if previous != nil && previous.Cloudflare != nil && cfg.TunnelID == "" {
+				cfg.TunnelID = previous.Cloudflare.TunnelID
+			}
+		}
+		item.Cloudflare = &cfg
+		return item
+	default:
+		item.Provider = model.ProviderSSH
+		item.DevTunnel = nil
+		item.Cloudflare = nil
+		return item
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/BurntSushi/toml"
+	"loris-tunnel/internal/model"
 )
 
 var (
@@ -17,8 +18,10 @@ var (
 )
 
 type Storage struct {
-	path string
-	mu   sync.Mutex
+	path    string
+	mu      sync.Mutex
+	onSave  func(*Config)
+	runtime map[int]model.Tunnel
 }
 
 func (r *Storage) Path() string {
@@ -31,6 +34,11 @@ func NewStorage(path string) (*Storage, error) {
 		return nil, fmt.Errorf("config path is empty")
 	}
 
+	if info, e := os.Stat(trimmed); e == nil && info.Mode().IsRegular() {
+		if e = protectPrivate(trimmed); e != nil {
+			return nil, fmt.Errorf("protect config file: %w", e)
+		}
+	}
 	return &Storage{path: trimmed}, nil
 }
 
@@ -94,7 +102,7 @@ func MigrateFromLocalConfigIfNeeded(targetPath string) error {
 			return fmt.Errorf("create config dir for migration: %w", err)
 		}
 	}
-	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+	if err := WritePrivateAtomic(targetPath, data); err != nil {
 		return fmt.Errorf("write migrated config: %w", err)
 	}
 
@@ -126,9 +134,15 @@ func (r *Storage) Load() (*Config, error) {
 	return cfg.Clone(), nil
 }
 
-func (r *Storage) Update(mutator func(cfg *Config) error) (*Config, error) {
+func (r *Storage) Update(mutator func(cfg *Config) error) (result *Config, err error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer func() {
+		notify := r.onSave
+		r.mu.Unlock()
+		if err == nil && notify != nil && result != nil {
+			notify(result)
+		}
+	}()
 
 	cfg, err := r.loadLocked()
 	if err != nil {
@@ -143,6 +157,10 @@ func (r *Storage) Update(mutator func(cfg *Config) error) (*Config, error) {
 		return nil, err
 	}
 
+	r.runtime = make(map[int]model.Tunnel, len(cfg.Tunnels))
+	for _, t := range cfg.Tunnels {
+		r.runtime[t.ID] = t
+	}
 	return cfg.Clone(), nil
 }
 
@@ -165,11 +183,7 @@ func (r *Storage) loadLocked() (*Config, error) {
 	}
 
 	if len(strings.TrimSpace(string(data))) == 0 {
-		cfg := DefaultConfig()
-		if err := r.saveLocked(cfg); err != nil {
-			return nil, err
-		}
-		return cfg, nil
+		return DefaultConfig(), nil
 	}
 
 	cfg, err := ParseConfigTOML(data)
@@ -177,6 +191,13 @@ func (r *Storage) loadLocked() (*Config, error) {
 		return nil, err
 	}
 	cfg.Normalize()
+	for i := range cfg.Tunnels {
+		t := &cfg.Tunnels[i]
+		if state, ok := r.runtime[t.ID]; ok && state.Name == t.Name && state.LocalHost == t.LocalHost && state.LocalPort == t.LocalPort {
+			t.Status = state.Status
+			t.LastError = state.LastError
+		}
+	}
 	return cfg, nil
 }
 
@@ -188,12 +209,7 @@ func (r *Storage) saveLocked(cfg *Config) error {
 	cfg.Normalize()
 	data := encodeConfigTOML(cfg)
 
-	tmpPath := r.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
-		return err
-	}
-
-	return os.Rename(tmpPath, r.path)
+	return WritePrivateAtomic(r.path, data)
 }
 
 func (r *Storage) ensureParentDirLocked() error {
@@ -225,4 +241,37 @@ func encodeConfigTOML(cfg *Config) []byte {
 		return []byte("")
 	}
 	return []byte(buf.String())
+}
+
+// ExportTOML excludes the machine-local cloud synchronization baseline.
+func ExportTOML(cfg *Config) []byte {
+	cfg = cfg.Clone()
+	cfg.SyncBaseline = SyncBaseline{}
+	cfg.SyncBaselines = nil
+	return encodeConfigTOML(cfg)
+}
+
+func (r *Storage) ObserveSave(observer func(*Config)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onSave = observer
+}
+
+// UpdateRuntime changes connection status without rewriting the backed-up file.
+// User choices such as manually_stopped continue to use Update and persist normally.
+func (r *Storage) UpdateRuntime(mutator func(*Config) error) (*Config, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cfg, e := r.loadLocked()
+	if e != nil {
+		return nil, e
+	}
+	if e = mutator(cfg); e != nil {
+		return nil, e
+	}
+	r.runtime = make(map[int]model.Tunnel, len(cfg.Tunnels))
+	for _, t := range cfg.Tunnels {
+		r.runtime[t.ID] = t
+	}
+	return cfg.Clone(), nil
 }

@@ -1,0 +1,340 @@
+package biz
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"loris-tunnel/internal/conf"
+	"loris-tunnel/internal/devtunnel"
+	"loris-tunnel/internal/forward"
+)
+
+type devServiceHost interface {
+	tunnelRuntime
+	Start() error
+	URL() string
+}
+
+type devServiceSession struct {
+	key        string
+	host       devServiceHost
+	generation uint64
+	members    map[int]*devServiceRuntime
+}
+
+// One service owns its row lifecycle; the session owns the single CLI process.
+type devServiceRuntime struct {
+	biz    *TunnelBiz
+	key    string
+	id     int
+	target devtunnel.ServiceTarget
+	done   chan struct{}
+	events chan forward.RuntimeEvent
+	mu     sync.Mutex
+	url    string
+	err    error
+	closed bool // guarded by devSessionMu
+}
+
+func (r *devServiceRuntime) Done() <-chan struct{}               { return r.done }
+func (r *devServiceRuntime) Events() <-chan forward.RuntimeEvent { return r.events }
+func (r *devServiceRuntime) Err() error                          { r.mu.Lock(); defer r.mu.Unlock(); return r.err }
+func (r *devServiceRuntime) PublicURL() string                   { r.mu.Lock(); defer r.mu.Unlock(); return r.url }
+func (r *devServiceRuntime) Stop() error                         { return r.biz.stopDevService(r) }
+func (r *devServiceRuntime) finish(err error) {
+	if r.closed {
+		return
+	}
+	r.closed = true
+	r.mu.Lock()
+	r.err = err
+	r.mu.Unlock()
+	close(r.events)
+	close(r.done)
+}
+func (r *devServiceRuntime) emit(event forward.RuntimeEvent) {
+	select {
+	case r.events <- event:
+	default:
+	}
+}
+
+func (b *TunnelBiz) startDevService(ctx context.Context, r *devServiceRuntime) error {
+	unlock := b.lockResource(resourceLockKey("devtunnel", r.key))
+	defer unlock()
+	b.devSessionMu.Lock()
+	defer b.devSessionMu.Unlock()
+	if r.closed || ctx.Err() != nil {
+		r.finish(context.Canceled)
+		return context.Canceled
+	}
+	if b.devSessions == nil {
+		b.devSessions = make(map[string]*devServiceSession)
+	}
+	session := b.devSessions[r.key]
+	if session == nil {
+		session = &devServiceSession{key: r.key, members: make(map[int]*devServiceRuntime)}
+		b.devSessions[r.key] = session
+	}
+	for _, existing := range session.members {
+		if existing.target.Port == r.target.Port {
+			err := fmt.Errorf("Tunnel ID port %d is already running", r.target.Port)
+			r.finish(err)
+			return err
+		}
+	}
+	session.members[r.id] = r
+	if err := b.restartDevSession(ctx, session); err != nil {
+		delete(session.members, r.id)
+		r.finish(err)
+		// Restore the previously running services if adding a new service failed.
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+		defer cancel()
+		if len(session.members) > 0 {
+			if restoreErr := b.restartDevSession(restoreCtx, session); restoreErr != nil {
+				b.failDevSession(session, restoreErr)
+			}
+		} else {
+			delete(b.devSessions, r.key)
+		}
+		return err
+	}
+	return nil
+}
+
+func (b *TunnelBiz) stopDevService(r *devServiceRuntime) error {
+	b.devSessionMu.Lock()
+	defer b.devSessionMu.Unlock()
+	if r.closed {
+		return nil
+	}
+	session := b.devSessions[r.key]
+	if session == nil || session.members[r.id] != r {
+		r.finish(nil)
+		return nil
+	}
+	delete(session.members, r.id)
+	r.finish(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+	defer cancel()
+	if err := b.restartDevSession(ctx, session); err != nil {
+		// Never restore a deliberately stopped port after a failed reconfiguration.
+		b.failDevSession(session, err)
+		return err
+	}
+	if len(session.members) == 0 {
+		delete(b.devSessions, r.key)
+	}
+	return nil
+}
+
+// CLI port selection changes require a brief reconnect; row state and ownership stay separate.
+func (b *TunnelBiz) restartDevSession(ctx context.Context, session *devServiceSession) error {
+	session.generation++
+	if session.host != nil {
+		if err := session.host.Stop(); err != nil {
+			return err
+		}
+		session.host = nil
+	}
+	if len(session.members) == 0 {
+		return nil
+	}
+	targets := make([]devtunnel.ServiceTarget, 0, len(session.members))
+	for _, r := range session.members {
+		targets = append(targets, r.target)
+		if r.PublicURL() != "" {
+			r.emit(forward.RuntimeEvent{Type: forward.RuntimeEventDisconnected, Err: fmt.Errorf("updating shared Tunnel ID services")})
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].Port < targets[j].Port })
+	var host devServiceHost
+	if b.newDevServiceHost != nil {
+		host = b.newDevServiceHost(session.key, targets)
+	} else {
+		host = b.dev.NewServiceHost(session.key, targets)
+	}
+	session.host = host
+	stopOnCancel := context.AfterFunc(ctx, func() { _ = host.Stop() })
+	err := host.Start()
+	stopOnCancel()
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err == nil {
+		for _, value := range strings.Split(host.URL(), ",") {
+			matched := false
+			for _, target := range targets {
+				if len(devtunnel.URLsForPort([]string{value}, target.Port)) > 0 {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				err = fmt.Errorf("dev tunnel CLI published a port outside the active service set")
+				break
+			}
+		}
+	}
+	if err == nil {
+		for _, r := range session.members {
+			urls := devtunnel.URLsForPort(strings.Split(host.URL(), ","), r.target.Port)
+			if len(urls) == 0 {
+				err = fmt.Errorf("dev tunnel CLI did not publish service port %d", r.target.Port)
+				break
+			}
+			r.mu.Lock()
+			r.url = strings.Join(urls, ", ")
+			r.mu.Unlock()
+		}
+	}
+	if err != nil {
+		_ = host.Stop()
+		session.host = nil
+		return err
+	}
+	for _, r := range session.members {
+		r.emit(forward.RuntimeEvent{Type: forward.RuntimeEventReconnected})
+	}
+	generation := session.generation
+	go b.watchDevSession(session, host, generation)
+	return nil
+}
+
+func (b *TunnelBiz) failDevSession(session *devServiceSession, err error) {
+	session.generation++
+	if session.host != nil {
+		_ = session.host.Stop()
+		session.host = nil
+	}
+	for _, r := range session.members {
+		r.finish(err)
+	}
+	delete(b.devSessions, session.key)
+}
+
+func (b *TunnelBiz) watchDevSession(session *devServiceSession, host devServiceHost, generation uint64) {
+	events := host.Events()
+	for {
+		select {
+		case <-host.Done():
+			b.devSessionMu.Lock()
+			if session.generation == generation {
+				b.failDevSession(session, host.Err())
+			}
+			b.devSessionMu.Unlock()
+			return
+		case event, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			b.devSessionMu.Lock()
+			if session.generation != generation {
+				b.devSessionMu.Unlock()
+				return
+			}
+			if event.Type == forward.RuntimeEventReconnected {
+				for _, r := range session.members {
+					urls := devtunnel.URLsForPort(strings.Split(host.URL(), ","), r.target.Port)
+					if len(urls) == 0 {
+						b.failDevSession(session, fmt.Errorf("dev tunnel CLI did not republish service port %d", r.target.Port))
+						b.devSessionMu.Unlock()
+						return
+					}
+					r.mu.Lock()
+					r.url = strings.Join(urls, ", ")
+					r.mu.Unlock()
+				}
+			}
+			for _, r := range session.members {
+				r.emit(event)
+			}
+			b.devSessionMu.Unlock()
+		}
+	}
+}
+
+func sameServiceAddress(aHost string, aPort int, bHost string, bPort int) bool {
+	normalize := func(host string) string {
+		host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+		if ip := net.ParseIP(host); ip != nil {
+			return ip.String()
+		}
+		return host
+	}
+	return aPort == bPort && normalize(aHost) == normalize(bHost)
+}
+
+// Public ports are separate from target ports, allowing ip1:8080 and ip2:8080 to share an ID.
+// Assignment is persisted atomically so concurrent starts cannot choose the same public port.
+func (b *TunnelBiz) allocateDevTunnelPort(selfID int, id, host string, localPort int) (int, error) {
+	var published int
+	_, err := b.storage.Update(func(config *conf.Config) error {
+		index := -1
+		used := make(map[int]bool)
+		for i := range config.Tunnels {
+			item := &config.Tunnels[i]
+			if item.ID == selfID {
+				index = i
+				continue
+			}
+			if item.ProviderName() != "devtunnel" || item.DevTunnel == nil || !devtunnel.SameTunnelID(item.DevTunnel.TunnelID, id) {
+				continue
+			}
+			port := item.DevTunnel.TunnelPort
+			if port == 0 {
+				if item.ID > selfID && item.DevTunnel.LastPublicURL == "" {
+					continue
+				}
+				port = item.LocalPort
+			}
+			used[port] = true
+		}
+		if index < 0 || config.Tunnels[index].DevTunnel == nil {
+			return ErrTunnelNotFound
+		}
+		target := config.Tunnels[index].DevTunnel
+		if target.TunnelPort < 0 || target.TunnelPort > 65535 {
+			return fmt.Errorf("invalid public tunnel port")
+		}
+		if target.TunnelPort > 0 {
+			if used[target.TunnelPort] {
+				return fmt.Errorf("public tunnel port %d is already assigned", target.TunnelPort)
+			}
+			published = target.TunnelPort
+			return nil
+		}
+		published = localPort
+		needsBridge := !strings.EqualFold(host, "localhost") && host != "127.0.0.1" && host != "::1"
+		if !used[published] && needsBridge {
+			listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", fmt.Sprint(published)))
+			if err != nil {
+				published = 0
+			} else {
+				listener.Close()
+			}
+		}
+		if published == 0 || used[published] {
+			for {
+				listener, err := net.Listen("tcp4", "127.0.0.1:0")
+				if err != nil {
+					return fmt.Errorf("allocate public service port: %w", err)
+				}
+				published = listener.Addr().(*net.TCPAddr).Port
+				listener.Close()
+				if !used[published] {
+					break
+				}
+			}
+		}
+		target.TunnelPort = published
+		return nil
+	})
+	return published, err
+}

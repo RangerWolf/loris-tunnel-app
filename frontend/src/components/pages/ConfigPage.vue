@@ -1,6 +1,10 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CardHeader from '../common/CardHeader.vue'
+import SecretField from '../common/SecretField.vue'
+import CopyIconButton from '../common/CopyIconButton.vue'
+import UpgradePrompt from '../common/UpgradePrompt.vue'
 import {
   GetAutoRunEnabled,
   GetTrafficMonitorEnabled,
@@ -16,70 +20,60 @@ import {
   SelectConfigDirectory,
   SetConfigDirectory,
   ResetConfigDirectoryToDefault,
-  QuitApplication
+  QuitApplication,
 } from '../../../wailsjs/go/main/App'
 
 const props = defineProps({
   theme: {
     type: String,
-    required: true
+    required: true,
+  },
+  accentColor: {
+    type: String,
+    required: true,
   },
   appMeta: {
     type: Object,
-    required: true
+    required: true,
   },
   isPro: {
     type: Boolean,
-    required: true
+    required: true,
   },
   isStoreDistribution: {
     type: Boolean,
-    default: false
+    default: false,
   },
   proExpiryLabel: {
     type: String,
-    required: true
+    required: true,
   },
   licenseCode: {
     type: String,
-    default: ''
+    default: '',
   },
   configMessage: {
     type: String,
-    default: ''
+    default: '',
   },
   isCheckingUpdates: {
     type: Boolean,
-    default: false
+    default: false,
   },
   isRefreshingLicenseStatus: {
     type: Boolean,
-    default: false
+    default: false,
   },
   updateCheckDialog: {
     type: Object,
-    required: true
+    required: true,
   },
-  redeemPanelVisible: {
-    type: Boolean,
-    default: false
-  },
-  redeemCode: {
-    type: String,
-    default: ''
-  },
-  redeemError: {
-    type: String,
-    default: ''
-  },
-  redeemSubmitting: {
-    type: Boolean,
-    default: false
-  }
+
 })
 
 const emit = defineEmits([
   'theme-change',
+  'accent-color-change',
   'check-updates',
   'upgrade',
   'open-release-page',
@@ -89,9 +83,6 @@ const emit = defineEmits([
   'reload-state',
   'confirm-action',
   'traffic-monitor-change',
-  'update:redeem-code',
-  'submit-redeem',
-  'cancel-redeem'
 ])
 
 const { t, locale } = useI18n()
@@ -99,7 +90,7 @@ const autoRunEnabled = ref(false)
 const trafficMonitorEnabled = ref(true)
 const configBusy = ref('')
 const configLocationInfo = ref(null)
-
+const upgradePromptVisible = ref(false)
 onMounted(async () => {
   try {
     autoRunEnabled.value = await GetAutoRunEnabled()
@@ -123,7 +114,7 @@ async function loadConfigLocation() {
 }
 
 function hasConfigDirFileConflict(conflict) {
-  return !!(conflict?.hasConfigToml || conflict?.hasUILocale)
+  return !!(conflict?.hasConfigToml || conflict?.hasUILocale || conflict?.hasCloudSync)
 }
 
 async function getConfigDirTargetConflictSafe(dir) {
@@ -137,9 +128,7 @@ async function getConfigDirTargetConflictSafe(dir) {
 /** 目标目录复制迁移：冲突检测 → 覆盖/保留确认 → 执行 → 刷新路径 → 退出（打包版自动重启） */
 function emitConfirmApplyConfigDirWrite({ dir, conflict, busyKey, messageNoConflict, apply }) {
   const hasConflict = hasConfigDirFileConflict(conflict)
-  const message = hasConflict
-    ? t('config.configDirConflictPrompt', { dir })
-    : messageNoConflict
+  const message = hasConflict ? t('config.configDirConflictPrompt', { dir }) : messageNoConflict
 
   const run = async (overwrite) => {
     configBusy.value = busyKey
@@ -163,7 +152,7 @@ function emitConfirmApplyConfigDirWrite({ dir, conflict, busyKey, messageNoConfl
     secondaryLabel: hasConflict ? t('config.configDirConflictUseExisting') : '',
     secondaryButtonClass: 'btn-outline-primary',
     onSecondary: hasConflict ? () => run(false) : null,
-    onConfirm: async () => run(true)
+    onConfirm: async () => run(true),
   })
 }
 
@@ -193,7 +182,7 @@ async function runConfigDirTargetFlow({ resolveDir, busyKey, messageNoConflict, 
     conflict: res.conflict,
     busyKey,
     messageNoConflict: messageNoConflict(dir),
-    apply: (overwrite) => apply(overwrite, dir)
+    apply: (overwrite) => apply(overwrite, dir),
   })
 }
 
@@ -203,7 +192,7 @@ async function onChooseConfigDataDir() {
       resolveDir: () => SelectConfigDirectory(),
       busyKey: 'relocate',
       messageNoConflict: (dir) => t('config.configDirRelocateConfirm', { dir }),
-      apply: (overwrite, dir) => SetConfigDirectory(dir, overwrite)
+      apply: (overwrite, dir) => SetConfigDirectory(dir, overwrite),
     })
   } catch (err) {
     emit('set-config-message', String(err))
@@ -232,14 +221,14 @@ async function onResetConfigDataDir() {
     },
     busyKey: 'resetdir',
     messageNoConflict: () => t('config.configDirResetConfirm'),
-    apply: (overwrite) => ResetConfigDirectoryToDefault(overwrite)
+    apply: (overwrite) => ResetConfigDirectoryToDefault(overwrite),
   })
 }
 
-async function onAutoRunChange(checked) {
+async function onAutoRunChange(checked, input) {
   if (checked && !props.isPro) {
-    emit('set-config-message', t('config.autoRunProRequired'))
-    emit('upgrade')
+    input.checked = false
+    upgradePromptVisible.value = true
     return
   }
   try {
@@ -295,7 +284,7 @@ async function onImportConfig() {
         } finally {
           configBusy.value = ''
         }
-      }
+      },
     })
   } catch (err) {
     emit('set-config-message', String(err))
@@ -311,7 +300,6 @@ async function onOpenConfigDir() {
   }
 }
 
-
 watch(locale, async (newLocale) => {
   localStorage.setItem('loris-tunnel.locale', newLocale)
   try {
@@ -320,246 +308,234 @@ watch(locale, async (newLocale) => {
     /* backend may be unavailable in browser-only dev */
   }
 })
+function compactPath(path) {
+  return path.length > 52 ? `${path.slice(0, 24)}…${path.slice(-24)}` : path
+}
+function openReleasePage() {
+  emit('open-release-page')
+  emit('close-update-check-dialog')
+}
 </script>
 
 <template>
-  <section class="page-fade">
-    <div class="row g-3">
-      <div class="col-12 col-xl-6">
-        <div class="panel-card config-card">
-          <div class="panel-head mb-2">
-            <h2 class="panel-title mb-0">{{ t('config.general') }}</h2>
-          </div>
-
-          <div class="config-row">
-            <div>
-              <div class="config-name">{{ t('config.language') }}</div>
-              <div class="config-desc">{{ t('config.languageDesc') }}</div>
-            </div>
-            <div>
-              <select v-model="$i18n.locale" class="form-select form-select-sm">
+  <section class="page-fade visual-page config-page">
+    <div class="config-grid">
+      <div class="lt-card">
+        <CardHeader :title="t('config.appearance')" icon="bi-palette" />
+        <div class="lt-card-body">
+          <dl class="lt-kv config-kv">
+            <dt class="text-body-secondary">{{ t('config.language') }}</dt>
+            <dd>
+              <select v-model="$i18n.locale" class="form-select form-select-sm config-appearance-select" :aria-label="t('config.language')" aria-describedby="config-language-desc">
                 <option value="en">English</option>
                 <option value="zh-CN">简体中文</option>
                 <option value="zh-TW">繁體中文（台灣）</option>
                 <option value="zh-HK">繁體中文（香港）</option>
                 <option value="ru">Русский</option>
               </select>
-            </div>
-          </div>
-
-          <div class="config-row">
-            <div>
-              <div class="config-name">{{ t('config.theme') }}</div>
-              <div class="config-desc">{{ t('config.themeDesc') }}</div>
-            </div>
-            <div class="form-check form-switch m-0">
-              <input
-                id="themeSwitch"
-                class="form-check-input"
-                type="checkbox"
-                :checked="theme === 'dark'"
-                @change="$emit('theme-change', $event.target.checked)"
-              />
-            </div>
-          </div>
-
-          <div class="config-row">
-            <div>
-              <div class="config-name">{{ t('config.autoRun') }}</div>
-              <div class="config-desc">{{ t('config.autoRunDesc') }}</div>
-            </div>
-            <div class="form-check form-switch m-0">
-              <input
-                id="autoRunSwitch"
-                class="form-check-input"
-                type="checkbox"
-                :checked="autoRunEnabled"
-                @change="onAutoRunChange($event.target.checked)"
-              />
-            </div>
-          </div>
-
-          <div class="config-row">
-            <div>
-              <div class="config-name">{{ t('config.trafficMonitor') }}</div>
-              <div class="config-desc">{{ t('config.trafficMonitorDesc') }}</div>
-            </div>
-            <div class="form-check form-switch m-0">
-              <input
-                id="trafficMonitorSwitch"
-                class="form-check-input"
-                type="checkbox"
-                :checked="trafficMonitorEnabled"
-                @change="onTrafficMonitorChange($event.target.checked)"
-              />
-            </div>
-          </div>
-
-          <div class="config-row align-items-center">
-            <div>
-              <div class="config-name">{{ t('config.manageConfig') }}</div>
-              <div class="config-desc">{{ t('config.manageConfigDesc') }}</div>
-            </div>
-            <div class="btn-group" role="group" :aria-label="t('config.manageConfig')">
-              <button
-                type="button"
-                class="btn btn-sm btn-secondary"
-                :disabled="configBusy !== ''"
-                @click="onImportConfig"
-              >
-                {{ t('config.importConfigBtn') }}
-              </button>
-              <button
-                type="button"
-                class="btn btn-sm btn-secondary"
-                :disabled="configBusy !== ''"
-                @click="onExportConfig"
-              >
-                {{ t('config.exportConfigBtn') }}
-              </button>
-              <button
-                type="button"
-                class="btn btn-sm btn-secondary"
-                @click="onOpenConfigDir"
-              >
-                {{ t('config.openConfigDirBtn') }}
-              </button>
-            </div>
-          </div>
-
-          <div class="config-row align-items-start">
-            <div class="flex-grow-1 min-w-0 pe-2">
-              <div class="config-name">{{ t('config.configDataDir') }}</div>
-              <div class="config-desc">
-                <span
-                  v-if="configLocationInfo?.effectiveConfigDir"
-                  class="text-break d-block"
-                >{{ t('config.configDirCurrentPathPrefix') }}{{ configLocationInfo.effectiveConfigDir }}</span>
-                <template v-else>{{ t('config.configDirUnavailable') }}</template>
+              <small id="config-language-desc">{{ t('config.languageDesc') }}</small>
+            </dd>
+            <dt class="text-body-secondary">{{ t('config.brandColor') }}</dt>
+            <dd>
+              <div class="config-accent-swatches" role="group" :aria-label="t('config.brandColor')" aria-describedby="config-brand-color-desc">
+                <button
+                  type="button"
+                  class="config-accent-swatch config-accent-swatch--blue"
+                  :class="{ 'is-selected': accentColor === 'blue' }"
+                  :aria-label="t('config.brandBlue')"
+                  :aria-pressed="accentColor === 'blue'"
+                  :title="t('config.brandBlue')"
+                  @click="$emit('accent-color-change', 'blue')"
+                >
+                  <i v-if="accentColor === 'blue'" class="bi bi-check-lg" aria-hidden="true"></i>
+                </button>
+                <button
+                  type="button"
+                  class="config-accent-swatch config-accent-swatch--green"
+                  :class="{ 'is-selected': accentColor === 'green' }"
+                  :aria-label="t('config.brandGreen')"
+                  :aria-pressed="accentColor === 'green'"
+                  :title="t('config.brandGreen')"
+                  @click="$emit('accent-color-change', 'green')"
+                >
+                  <i v-if="accentColor === 'green'" class="bi bi-check-lg" aria-hidden="true"></i>
+                </button>
               </div>
-            </div>
-            <div
-              class="btn-group flex-shrink-0 align-self-start"
-              role="group"
-              :aria-label="t('config.configDataDir')"
-            >
-              <button
-                type="button"
-                class="btn btn-sm btn-secondary"
-                :disabled="configBusy !== ''"
-                @click="onChooseConfigDataDir"
-              >
-                {{ t('config.chooseConfigDirBtn') }}
-              </button>
-              <button
-                v-if="configLocationInfo?.isCustomConfigDir"
-                type="button"
-                class="btn btn-sm btn-outline-secondary"
-                :disabled="configBusy !== ''"
-                @click="onResetConfigDataDir"
-              >
-                {{ t('config.resetConfigDirBtn') }}
-              </button>
-            </div>
-          </div>
-
+              <small id="config-brand-color-desc">{{ t('config.brandColorDesc') }}</small>
+            </dd>
+            <dt class="text-body-secondary">{{ t('config.theme') }}</dt>
+            <dd>
+              <div class="form-check form-switch m-0">
+                <input
+                  id="themeSwitch"
+                  class="form-check-input"
+                  type="checkbox"
+                  :checked="theme === 'dark'"
+                  :aria-label="t('config.theme')"
+                  aria-describedby="config-theme-desc"
+                  @change="$emit('theme-change', $event.target.checked)"
+                />
+              </div>
+              <small id="config-theme-desc">{{ t('config.themeDesc') }}</small>
+            </dd>
+          </dl>
         </div>
       </div>
-
-      <div class="col-12 col-xl-6">
-        <div class="panel-card config-card">
-          <div class="panel-head mb-2">
-            <h2 class="panel-title mb-0">{{ t('config.advancedSettings') }}</h2>
-          </div>
-
-          <div class="config-row align-items-center">
-            <div>
-              <div class="config-name">{{ t('config.currentVersion') }}</div>
-              <div class="config-desc">{{ appMeta.version }}</div>
-            </div>
-            <button
-              v-if="!isStoreDistribution"
-              type="button"
-              class="btn btn-sm btn-secondary position-relative check-updates-btn"
-              :disabled="isCheckingUpdates"
-              @click="$emit('check-updates')"
-            >
-              <span :class="{ 'invisible': isCheckingUpdates }">{{ t('config.checkUpdates') }}</span>
-              <span v-if="isCheckingUpdates" class="position-absolute top-50 start-50 translate-middle text-nowrap small">
-                {{ t('config.checkingUpdates') }}
+      <div class="lt-card">
+        <CardHeader :title="t('config.system')" icon="bi-sliders" />
+        <div class="lt-card-body">
+          <dl class="lt-kv config-kv">
+            <dt class="text-body-secondary">{{ t('config.autoRun') }} <span class="lt-pill lt-pill--primary ms-1">PRO</span></dt>
+            <dd>
+              <div class="form-check form-switch m-0">
+                <input
+                  id="autoRunSwitch"
+                  class="form-check-input"
+                  type="checkbox"
+                  :checked="autoRunEnabled"
+                  :aria-label="t('config.autoRun')"
+                  aria-describedby="config-auto-run-desc"
+                  @change="onAutoRunChange($event.target.checked, $event.target)"
+                />
+              </div>
+              <small id="config-auto-run-desc">{{ t('config.autoRunDesc') }}</small>
+            </dd>
+            <dt class="text-body-secondary">{{ t('config.trafficMonitor') }}</dt>
+            <dd>
+              <div class="form-check form-switch m-0">
+                <input
+                  id="trafficMonitorSwitch"
+                  class="form-check-input"
+                  type="checkbox"
+                  :checked="trafficMonitorEnabled"
+                  :aria-label="t('config.trafficMonitor')"
+                  aria-describedby="config-traffic-desc"
+                  @change="onTrafficMonitorChange($event.target.checked)"
+                />
+              </div>
+              <small id="config-traffic-desc">{{ t('config.trafficMonitorDesc') }}</small>
+            </dd>
+          </dl>
+        </div>
+      </div>
+      <div class="lt-card">
+        <CardHeader :title="t('config.data')" icon="bi-folder2" />
+        <div class="lt-card-body">
+          <dl class="lt-kv config-kv">
+            <dt class="text-body-secondary">{{ t('config.manageConfig') }}</dt>
+            <dd>
+              <div class="btn-group" role="group" :aria-label="t('config.manageConfig')">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :disabled="configBusy !== ''"
+                  @click="onImportConfig"
+                >
+                  {{ t('config.importConfigBtn') }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :disabled="configBusy !== ''"
+                  @click="onExportConfig"
+                >
+                  {{ t('config.exportConfigBtn') }}
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @click="onOpenConfigDir">
+                  {{ t('config.openConfigDirBtn') }}
+                </button>
+              </div>
+              <small>{{ t('config.manageConfigDesc') }}</small>
+            </dd>
+            <dt class="text-body-secondary">{{ t('config.configDataDir') }}</dt>
+            <dd>
+              <span v-if="configLocationInfo?.effectiveConfigDir" class="config-path-row">
+                <span class="lt-mono config-path" :title="configLocationInfo.effectiveConfigDir">{{ compactPath(configLocationInfo.effectiveConfigDir) }}</span>
+                <CopyIconButton :value="configLocationInfo.effectiveConfigDir" @error="emit('set-config-message', $event)" />
               </span>
-            </button>
-            <span v-else class="config-desc text-muted">{{ t('config.storeUpdatesManaged') }}</span>
-          </div>
-
-          <div class="config-row align-items-center">
-            <div>
-              <div class="config-name">{{ t('config.licenseStatus') }}</div>
-              <div class="config-desc">
-                <span v-if="isPro">{{ t('config.licenseCode') }}: {{ licenseCode }}</span>
-                <span v-else class="text-muted">{{ t('config.freeVersion') }}</span>
+              <small v-else>{{ t('config.configDirUnavailable') }}</small>
+              <div class="config-dir-actions">
+                <div class="btn-group" role="group" :aria-label="t('config.configDataDir')">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    :disabled="configBusy !== ''"
+                    @click="onChooseConfigDataDir"
+                  >
+                    {{ t('config.chooseConfigDirBtn') }}
+                  </button>
+                  <button
+                    v-if="configLocationInfo?.isCustomConfigDir"
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    :disabled="configBusy !== ''"
+                    @click="onResetConfigDataDir"
+                  >
+                    {{ t('config.resetConfigDirBtn') }}
+                  </button>
+                </div>
               </div>
-            </div>
-            <div class="btn-group" role="group" :aria-label="t('config.licenseStatus')">
-              <button
-                v-if="!isPro"
-                type="button"
-                class="btn btn-sm btn-secondary"
-                @click="$emit('upgrade')"
-              >
-                {{ t('config.upgradePro') }}
-              </button>
-              <button
-                v-else
-                type="button"
-                class="pro-badge pro-badge-btn"
-                :disabled="isRefreshingLicenseStatus"
-                :title="t('config.refreshLicenseStatusHint')"
-                @click="$emit('refresh-license-status')"
-              >
-                {{ isRefreshingLicenseStatus ? t('config.refreshingLicenseStatus') : `Pro · ${proExpiryLabel}` }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="redeemPanelVisible" class="license-redeem-panel mt-3">
-            <div class="fw-semibold mb-2">{{ t('config.redeemDialog.title') }}</div>
-            <label for="redeemCodeInput" class="form-label">{{ t('config.redeemDialog.codeLabel') }}</label>
-            <input
-              id="redeemCodeInput"
-              :value="redeemCode"
-              type="text"
-              class="form-control"
-              :placeholder="t('config.redeemDialog.codePlaceholder')"
-              :disabled="redeemSubmitting"
-              @input="$emit('update:redeem-code', $event.target.value)"
-              @keyup.enter="$emit('submit-redeem')"
-            />
-            <div class="field-note mt-1">{{ t('config.redeemDialog.codeHint') }}</div>
-            <p v-if="redeemError" class="form-error mb-0 mt-2">{{ redeemError }}</p>
-            <div class="d-flex justify-content-end gap-2 mt-3">
-              <button
-                type="button"
-                class="btn btn-outline-secondary btn-sm"
-                :disabled="redeemSubmitting"
-                @click="$emit('cancel-redeem')"
-              >
-                {{ t('app.common.cancel') }}
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary btn-sm"
-                :disabled="redeemSubmitting"
-                @click="$emit('submit-redeem')"
-              >
-                {{ redeemSubmitting ? t('config.redeemDialog.submitting') : t('app.sidebar.upgrade') }}
-              </button>
-            </div>
-          </div>
+            </dd>
+          </dl>
         </div>
       </div>
-
+      <div class="lt-card">
+        <CardHeader :title="t('config.aboutLicense')" icon="bi-info-circle" />
+        <div class="lt-card-body">
+          <dl class="lt-kv config-kv">
+            <dt class="text-body-secondary">{{ t('config.currentVersion') }}</dt>
+            <dd>
+              <div class="d-flex align-items-center flex-wrap gap-2">
+                <span>{{ appMeta.version }}</span>
+                <button
+                  v-if="!isStoreDistribution"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary position-relative check-updates-btn"
+                  :disabled="isCheckingUpdates"
+                  @click="$emit('check-updates')"
+                >
+                  <span :class="{ invisible: isCheckingUpdates }">{{ t('config.checkUpdates') }}</span>
+                  <span
+                    v-if="isCheckingUpdates"
+                    class="position-absolute top-50 start-50 translate-middle text-nowrap small"
+                  >
+                    {{ t('config.checkingUpdates') }}
+                  </span>
+                </button>
+              </div>
+              <small v-if="isStoreDistribution">{{ t('config.storeUpdatesManaged') }}</small>
+            </dd>
+            <dt class="text-body-secondary">{{ t('config.licenseStatus') }}</dt>
+            <dd>
+              <div class="d-flex align-items-center flex-wrap gap-2">
+                <span v-if="!isPro">{{ t('config.freeVersion') }}</span>
+                <button v-if="!isPro" type="button" class="btn btn-sm btn-outline-primary" @click="$emit('upgrade')">
+                  {{ t('config.upgradePro') }}
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="lt-pill lt-pill--primary"
+                  :disabled="isRefreshingLicenseStatus"
+                  :title="t('config.refreshLicenseStatusHint')"
+                  @click="$emit('refresh-license-status')"
+                >
+                  {{ isRefreshingLicenseStatus ? t('config.refreshingLicenseStatus') : `Pro · ${proExpiryLabel}` }}
+                </button>
+              </div>
+              <div v-if="isPro" class="license-secret">
+                <span class="text-body-secondary">{{ t('config.licenseCode') }}</span>
+                <SecretField :value="licenseCode" @error="$emit('set-config-message', $event)" />
+              </div>
+              <div v-if="!isPro" class="mt-2 small text-body-secondary">
+                <button type="button" class="btn btn-link btn-sm p-0 license-code-entry" @click="$emit('upgrade', 'activate')">{{ t('purchase.haveCode') }}</button>
+              </div>
+            </dd>
+          </dl>
+        </div>
+      </div>
     </div>
+    <UpgradePrompt v-if="upgradePromptVisible" :feature="t('config.autoRun')" :description="t('config.autoRunDesc')" @close="upgradePromptVisible = false" @upgrade="upgradePromptVisible = false; $emit('upgrade')" />
   </section>
 
   <div
@@ -596,15 +572,11 @@ watch(locale, async (newLocale) => {
               v-if="updateCheckDialog.mode === 'updateAvailable'"
               type="button"
               class="btn btn-primary"
-              @click="$emit('open-release-page'); $emit('close-update-check-dialog')"
+              @click="openReleasePage"
             >
               {{ t('config.openDownloadPage') }}
             </button>
-            <button
-              type="button"
-              class="btn btn-outline-secondary"
-              @click="$emit('close-update-check-dialog')"
-            >
+            <button type="button" class="btn btn-outline-secondary" @click="$emit('close-update-check-dialog')">
               {{ t('app.common.close') }}
             </button>
           </div>
@@ -613,5 +585,23 @@ watch(locale, async (newLocale) => {
     </div>
   </div>
   <div v-if="updateCheckDialog.visible" class="modal-backdrop fade show" />
-
 </template>
+
+<style scoped>
+.config-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.config-kv .btn { font-weight: 400; }
+.config-appearance-select { width: min(100%, 240px); }
+.config-accent-swatches { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.config-accent-swatch { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: #fff; border: 1px solid rgba(0, 0, 0, .12); border-radius: var(--lt-radius-md); cursor: pointer; }
+.config-accent-swatch--blue { background: #1b6be0; --swatch-ring: rgba(27, 107, 224, .22); }
+.config-accent-swatch--green { background: #0f766e; --swatch-ring: rgba(15, 118, 110, .22); }
+.config-accent-swatch.is-selected { box-shadow: 0 0 0 2px var(--swatch-ring); }
+.config-accent-swatch:focus-visible { outline: 2px solid var(--lt-ink); outline-offset: 3px; }
+.config-accent-swatch .bi { font-size: 14px; line-height: 1; }
+.config-path-row { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.config-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-dir-actions { margin-top: 8px; }
+.license-code-entry { font-size: 0.75rem; text-decoration: none; text-align: start; white-space: normal; }
+.license-code-entry:hover { text-decoration: underline; }
+.license-secret { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+</style>

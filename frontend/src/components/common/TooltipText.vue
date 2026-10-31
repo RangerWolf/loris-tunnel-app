@@ -14,6 +14,10 @@ const props = defineProps({
   placement: {
     type: String,
     default: 'top'
+  },
+  title: {
+    type: String,
+    default: ''
   }
 })
 
@@ -43,7 +47,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => props.text,
+  () => props.title || props.text,
   (newText) => {
     if (tooltipInstance) {
       tooltipInstance.setContent({ '.tooltip-inner': newText || '' })
@@ -60,8 +64,8 @@ watch(
     :class="className"
     data-bs-toggle="tooltip"
     :data-bs-placement="placement"
-    :data-bs-title="text"
+    :data-bs-title="title || text"
   >
-    {{ text }}
+    <slot>{{ text }}</slot>
   </span>
 </template>

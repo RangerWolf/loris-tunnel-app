@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/url"
 	"os"
@@ -19,8 +18,11 @@ import (
 	"loris-tunnel/internal/aidebug"
 	"loris-tunnel/internal/autostart"
 	"loris-tunnel/internal/biz"
+	"loris-tunnel/internal/cloudflared"
+	"loris-tunnel/internal/cloudsync"
 	"loris-tunnel/internal/conf"
 	"loris-tunnel/internal/device"
+	"loris-tunnel/internal/devtunnel"
 	"loris-tunnel/internal/license"
 	"loris-tunnel/internal/model"
 	"loris-tunnel/internal/sshconfig"
@@ -50,16 +52,20 @@ type OpenReportEmailResult struct {
 
 // App struct
 type App struct {
-	ctx       context.Context
-	storage   *conf.Storage
-	jumper    *biz.JumperBiz
-	group     *biz.GroupBiz
-	tunnel    *biz.TunnelBiz
-	updater   *updater.Service
-	license   *license.Client
-	aiDebug   *aidebug.Service
-	machineID string
-	initErr   error
+	configGate    sync.Mutex
+	cloudSync     *cloudsync.Service
+	cloudSyncErr  error
+	ctx           context.Context
+	storage       *conf.Storage
+	jumper        *biz.JumperBiz
+	group         *biz.GroupBiz
+	tunnel        *biz.TunnelBiz
+	updater       *updater.Service
+	license       *license.Client
+	licenseActive atomic.Bool
+	aiDebug       *aidebug.Service
+	machineID     string
+	initErr       error
 
 	trayMu   sync.Mutex
 	trayShow *systray.MenuItem
@@ -70,10 +76,10 @@ type App struct {
 	usageReporterStop chan struct{}
 	usageReporterWG   sync.WaitGroup
 
-	trafficMu         sync.Mutex
-	lastTrafficUp     uint64
-	lastTrafficDown   uint64
-	lastTrafficAt     time.Time
+	trafficMu       sync.Mutex
+	lastTrafficUp   uint64
+	lastTrafficDown uint64
+	lastTrafficAt   time.Time
 }
 
 // NewApp creates a new App application struct
@@ -231,8 +237,17 @@ func (a *App) startup(ctx context.Context) {
 	slog.Info("app startup")
 	if err := a.ensureReady(); err == nil {
 		a.syncAutoRunWithConfig()
+		a.cloudSyncErr = a.initializeCloudSync()
+		if a.cloudSync != nil {
+			a.cloudSync.Start()
+		}
 		go func() {
 			limit := a.tunnelStartLimit()
+			a.configGate.Lock()
+			defer a.configGate.Unlock()
+			if a.allowClose.Load() {
+				return
+			}
 			if err := a.tunnel.StartAutoStart(limit); err != nil {
 				slog.Error("auto start tunnel failed", "err", err)
 			}
@@ -260,10 +275,16 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 
 func (a *App) shutdown(ctx context.Context) {
 	_ = ctx
+	a.allowClose.Store(true)
 	slog.Info("app shutdown")
+	if a.cloudSync != nil {
+		a.cloudSync.Close()
+	}
 	a.stopUsageReporter()
 	if a.tunnel != nil {
+		a.configGate.Lock()
 		a.tunnel.Shutdown()
+		a.configGate.Unlock()
 	}
 }
 
@@ -305,6 +326,13 @@ func (a *App) stopUsageReporter() {
 	a.usageReporterWG.Wait()
 }
 
+func (a *App) usageAppVersion() string {
+	if a.license != nil && a.license.Environment() == "dev" {
+		return productVersion + "-dev"
+	}
+	return productVersion
+}
+
 func (a *App) reportUsageEvent(eventType string) {
 	if a.license == nil {
 		return
@@ -313,10 +341,11 @@ func (a *App) reportUsageEvent(eventType string) {
 	defer cancel()
 
 	_, err := a.license.ReportUsageEvent(ctx, model.UsageEventRequest{
-		MachineID: a.machineID,
-		EventType: eventType,
-		Platform:  runtime.GOOS,
-		ClientTS:  time.Now().UTC().Format(time.RFC3339),
+		MachineID:  a.machineID,
+		EventType:  eventType,
+		AppVersion: a.usageAppVersion(),
+		Platform:   runtime.GOOS,
+		ClientTS:   time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
 		slog.Warn("report usage event failed", "event_type", eventType, "error", err)
@@ -342,22 +371,17 @@ func (a *App) GetState() (model.State, error) {
 	if err := a.ensureReady(); err != nil {
 		return model.State{}, err
 	}
-	jumpers, err := a.jumper.List()
+	cfg, err := a.storage.Load()
 	if err != nil {
 		return model.State{}, err
 	}
-	tunnels, err := a.tunnel.List()
-	if err != nil {
-		return model.State{}, err
-	}
-	groups, err := a.group.List()
-	if err != nil {
-		return model.State{}, err
-	}
+	a.tunnel.AttachRuntimeState(cfg.Tunnels)
 	return model.State{
-		Jumpers: append([]model.Jumper{}, jumpers...),
-		Groups:  append([]model.TunnelGroup{}, groups...),
-		Tunnels: append([]model.Tunnel{}, tunnels...),
+		Jumpers:         append([]model.Jumper{}, cfg.Jumpers...),
+		Groups:          append([]model.TunnelGroup{}, cfg.Groups...),
+		Tunnels:         append([]model.Tunnel{}, cfg.Tunnels...),
+		ActiveSlots:     a.tunnel.RunningCount(),
+		ActiveSlotLimit: a.currentTunnelStartLimit(),
 	}, nil
 }
 
@@ -398,6 +422,8 @@ func (a *App) GetTrafficStats() (model.TrafficStats, error) {
 }
 
 func (a *App) ListJumpers() ([]model.Jumper, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
@@ -419,6 +445,8 @@ func (a *App) LoadSSHConfigJumpersByPath(configPath string) (model.SSHConfigImpo
 }
 
 func (a *App) CreateJumper(payload model.JumperPayload) (model.Jumper, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return model.Jumper{}, err
 	}
@@ -426,6 +454,8 @@ func (a *App) CreateJumper(payload model.JumperPayload) (model.Jumper, error) {
 }
 
 func (a *App) UpdateJumper(id int, payload model.JumperPayload) (model.Jumper, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return model.Jumper{}, err
 	}
@@ -440,6 +470,8 @@ func (a *App) TestJumperConnection(payload model.JumperPayload) error {
 }
 
 func (a *App) DeleteJumper(id int) error {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
@@ -447,6 +479,8 @@ func (a *App) DeleteJumper(id int) error {
 }
 
 func (a *App) ListTunnels() ([]model.Tunnel, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
@@ -454,6 +488,8 @@ func (a *App) ListTunnels() ([]model.Tunnel, error) {
 }
 
 func (a *App) ListGroups() ([]model.TunnelGroup, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return nil, err
 	}
@@ -461,6 +497,8 @@ func (a *App) ListGroups() ([]model.TunnelGroup, error) {
 }
 
 func (a *App) CreateGroup(payload model.TunnelGroupPayload) (model.TunnelGroup, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return model.TunnelGroup{}, err
 	}
@@ -468,6 +506,8 @@ func (a *App) CreateGroup(payload model.TunnelGroupPayload) (model.TunnelGroup, 
 }
 
 func (a *App) UpdateGroup(id int, payload model.TunnelGroupPayload) (model.TunnelGroup, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return model.TunnelGroup{}, err
 	}
@@ -475,6 +515,8 @@ func (a *App) UpdateGroup(id int, payload model.TunnelGroupPayload) (model.Tunne
 }
 
 func (a *App) DeleteGroup(id int) error {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
@@ -482,6 +524,8 @@ func (a *App) DeleteGroup(id int) error {
 }
 
 func (a *App) ReorderGroups(ids []int) error {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
@@ -489,6 +533,8 @@ func (a *App) ReorderGroups(ids []int) error {
 }
 
 func (a *App) CreateTunnel(payload model.TunnelPayload) (model.Tunnel, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return model.Tunnel{}, err
 	}
@@ -496,6 +542,8 @@ func (a *App) CreateTunnel(payload model.TunnelPayload) (model.Tunnel, error) {
 }
 
 func (a *App) UpdateTunnel(id int, payload model.TunnelPayload) (model.Tunnel, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return model.Tunnel{}, err
 	}
@@ -503,6 +551,8 @@ func (a *App) UpdateTunnel(id int, payload model.TunnelPayload) (model.Tunnel, e
 }
 
 func (a *App) MoveTunnelToGroup(id int, groupID int) (model.Tunnel, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return model.Tunnel{}, err
 	}
@@ -660,21 +710,306 @@ func (a *App) DebugSavedTunnelFailure(id int, rawError string, uiLocale string) 
 }
 
 func (a *App) DeleteTunnel(id int) error {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
 	return a.tunnel.Delete(id)
 }
 
+func (a *App) PreviewTunnelDeletion(id int) (biz.DeletionPreview, error) {
+	if err := a.ensureReady(); err != nil {
+		return biz.DeletionPreview{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.PreviewTunnelDeletion(ctx, id), nil
+}
+
+func (a *App) DeleteTunnelWithOptions(id int, cleanupRemote bool) (biz.DeletionResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return biz.DeletionResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return a.tunnel.DeleteTunnelWithOptions(ctx, id, cleanupRemote), nil
+}
+
+func (a *App) PreviewProviderResourceDeletion(provider, tunnelID string) (biz.DeletionPreview, error) {
+	if err := a.ensureReady(); err != nil {
+		return biz.DeletionPreview{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.PreviewProviderResourceDeletion(ctx, provider, tunnelID), nil
+}
+
+func (a *App) DeleteProviderResourceWithOptions(provider, tunnelID string, cleanupDNS bool) (biz.DeletionResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return biz.DeletionResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return a.tunnel.DeleteProviderResourceWithOptions(ctx, provider, tunnelID, cleanupDNS), nil
+}
+
+func (a *App) RetryDeletionCleanup(operationID string) (biz.DeletionResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return biz.DeletionResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return a.tunnel.RetryDeletionCleanup(ctx, operationID), nil
+}
+
+func (a *App) ListDeletionTasks() ([]biz.DeletionResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	return a.tunnel.ListDeletionTasks(), nil
+}
+
 func (a *App) ToggleTunnel(id int) (model.Tunnel, error) {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return model.Tunnel{}, err
 	}
-	return a.tunnel.Toggle(id, a.tunnelStartLimit())
+	return a.tunnel.Toggle(id, a.tunnelStartLimit)
 }
 
-// tunnelStartLimit returns FreePlanRunningLimit for non-Pro (or when license
-// cannot be verified), and 0 for Pro (unlimited).
+func (a *App) GetDevTunnelStatus() (devtunnel.Status, error) {
+	if err := a.ensureReady(); err != nil {
+		return devtunnel.Status{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.DevTunnelStatus(ctx)
+}
+
+func (a *App) ListDevTunnelResources(force bool) (devtunnel.ResourceList, error) {
+	if err := a.ensureReady(); err != nil {
+		return devtunnel.ResourceList{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.ListDevTunnelResourcesCached(ctx, force), nil
+}
+
+func (a *App) LoadDevTunnelRegions(measure, force bool) (devtunnel.RegionProbe, error) {
+	if err := a.ensureReady(); err != nil {
+		return devtunnel.RegionProbe{}, err
+	}
+	timeout := 15 * time.Second
+	if measure {
+		timeout = 20 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return a.tunnel.LoadDevTunnelRegions(ctx, measure, force), nil
+}
+
+func (a *App) GetDevTunnelResource(id string, force bool) (devtunnel.ResourceDetail, error) {
+	if err := a.ensureReady(); err != nil {
+		return devtunnel.ResourceDetail{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.GetDevTunnelResourceCached(ctx, id, force), nil
+}
+
+func (a *App) CreateDevTunnelResource(input devtunnel.CreateResourceInput) (devtunnel.ResourceDetail, error) {
+	if err := a.ensureReady(); err != nil {
+		return devtunnel.ResourceDetail{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return a.tunnel.CreateDevTunnelResource(ctx, input), nil
+}
+
+func (a *App) DeleteDevTunnelResource(id string) (devtunnel.DeleteResourceResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return devtunnel.DeleteResourceResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return a.tunnel.DeleteDevTunnelResource(ctx, id), nil
+}
+
+func (a *App) StartDevTunnelLogin(kind string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	return a.tunnel.StartDevTunnelLogin(kind, func(phase, loginURL string) {
+		if a.ctx == nil {
+			return
+		}
+		wailsruntime.EventsEmit(a.ctx, "devtunnel:login-progress", map[string]string{
+			"phase": phase,
+			"url":   loginURL,
+		})
+	}, func() {
+		if a.ctx == nil {
+			return
+		}
+		wailsruntime.EventsEmit(a.ctx, "devtunnel:login")
+	})
+}
+
+func (a *App) CancelDevTunnelLogin() {
+	if a.tunnel == nil {
+		return
+	}
+	a.tunnel.CancelDevTunnelLogin()
+}
+
+func (a *App) LogoutDevTunnel() error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.LogoutDevTunnel(ctx)
+}
+
+func (a *App) InstallDevTunnelCLI() error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	return a.tunnel.InstallDevTunnelCLI(ctx)
+}
+
+func (a *App) CancelDevTunnelInstall() {
+	if a.tunnel == nil {
+		return
+	}
+	a.tunnel.CancelDevTunnelInstall()
+}
+
+func (a *App) GetCloudflareStatus() (cloudflared.Status, error) {
+	if err := a.ensureReady(); err != nil {
+		return cloudflared.Status{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.CloudflareStatus(ctx)
+}
+
+func (a *App) ListCloudflareResources(force bool) (cloudflared.ResourceList, error) {
+	if err := a.ensureReady(); err != nil {
+		return cloudflared.ResourceList{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.ListCloudflareResourcesCached(ctx, force), nil
+}
+
+func (a *App) ListCloudflareZones(force bool) (cloudflared.ZoneList, error) {
+	if err := a.ensureReady(); err != nil {
+		return cloudflared.ZoneList{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.ListCloudflareAuthorizations(ctx, force), nil
+}
+
+func (a *App) ListCloudflareAuthorizations(force bool) (cloudflared.ZoneList, error) {
+	return a.ListCloudflareZones(force)
+}
+
+func (a *App) RemoveCloudflareAuthorization(zoneID string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return a.tunnel.RemoveCloudflareAuthorization(ctx, zoneID)
+}
+
+func (a *App) GetCloudflareResource(id string, force bool) (cloudflared.ResourceDetail, error) {
+	if err := a.ensureReady(); err != nil {
+		return cloudflared.ResourceDetail{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return a.tunnel.GetCloudflareResourceCached(ctx, id, force), nil
+}
+
+func (a *App) CreateCloudflareResource(input cloudflared.CreateResourceInput) (cloudflared.ResourceDetail, error) {
+	if err := a.ensureReady(); err != nil {
+		return cloudflared.ResourceDetail{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return a.tunnel.CreateCloudflareResource(ctx, input), nil
+}
+
+func (a *App) DeleteCloudflareResource(id string) (cloudflared.DeleteResourceResult, error) {
+	if err := a.ensureReady(); err != nil {
+		return cloudflared.DeleteResourceResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return a.tunnel.DeleteCloudflareResource(ctx, id), nil
+}
+
+func (a *App) StartCloudflareLogin() error {
+	return a.StartCloudflareZoneAuthorization("")
+}
+
+func (a *App) StartCloudflareZoneAuthorization(zoneID string) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	return a.tunnel.StartCloudflareZoneAuthorization(zoneID, func(phase, loginURL string) {
+		if a.ctx == nil {
+			return
+		}
+		wailsruntime.EventsEmit(a.ctx, "cloudflare:login-progress", map[string]string{
+			"phase": phase,
+			"url":   loginURL,
+		})
+	}, func() {
+		if a.ctx == nil {
+			return
+		}
+		wailsruntime.EventsEmit(a.ctx, "cloudflare:login")
+	})
+}
+
+func (a *App) CancelCloudflareLogin() {
+	if a.tunnel == nil {
+		return
+	}
+	a.tunnel.CancelCloudflareLogin()
+}
+
+func (a *App) InstallCloudflareCLI() error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	return a.tunnel.InstallCloudflareCLI(ctx)
+}
+
+func (a *App) CancelCloudflareInstall() {
+	if a.tunnel == nil {
+		return
+	}
+	a.tunnel.CancelCloudflareInstall()
+}
+
+func (a *App) currentTunnelStartLimit() int {
+	if a.licenseActive.Load() {
+		return 0
+	}
+	return biz.FreePlanRunningLimit
+}
+
 func (a *App) tunnelStartLimit() int {
 	if a.license == nil {
 		return biz.FreePlanRunningLimit
@@ -682,12 +1017,10 @@ func (a *App) tunnelStartLimit() int {
 	machineID := strings.TrimSpace(a.machineID)
 	if machineID == "" {
 		machineID = device.MachineID()
-		a.machineID = machineID
 	}
 	if machineID == "" {
 		return biz.FreePlanRunningLimit
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	status, err := a.license.GetStatus(ctx, machineID)
@@ -695,10 +1028,8 @@ func (a *App) tunnelStartLimit() int {
 		slog.Warn("license check for tunnel start limit failed; applying free plan limit", "err", err)
 		return biz.FreePlanRunningLimit
 	}
-	if status.Active {
-		return 0
-	}
-	return biz.FreePlanRunningLimit
+	a.licenseActive.Store(status.Active)
+	return a.currentTunnelStartLimit()
 }
 
 func collectJumpersForApp(items []model.Jumper, ids []int) ([]model.Jumper, error) {
@@ -760,6 +1091,7 @@ func (a *App) GetLicenseStatus() (model.LicenseStatus, error) {
 	if err != nil {
 		return model.LicenseStatus{}, err
 	}
+	a.licenseActive.Store(status.Active)
 	if err := a.saveLicenseCode(status.Code); err != nil {
 		slog.Warn("save license code failed", "error", err)
 	}
@@ -785,6 +1117,7 @@ func (a *App) RedeemLicenseCode(code string) (model.LicenseRedeemResult, error) 
 	if err != nil {
 		return model.LicenseRedeemResult{}, err
 	}
+	a.licenseActive.Store(result.Active)
 	if err := a.saveLicenseCode(result.Code); err != nil {
 		slog.Warn("save license code failed", "error", err)
 	}
@@ -911,6 +1244,8 @@ func (a *App) ExportConfigWithDialog() error {
 }
 
 func (a *App) ExportConfig(destPath string) error {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
@@ -919,25 +1254,20 @@ func (a *App) ExportConfig(destPath string) error {
 		return fmt.Errorf("destination path is empty")
 	}
 
-	src, err := os.Open(a.storage.Path())
+	cfg, err := a.storage.Load()
 	if err != nil {
-		return fmt.Errorf("open config file: %w", err)
+		return err
 	}
-	defer src.Close()
+	if filepath.Clean(destPath) == filepath.Clean(a.storage.Path()) {
+		return fmt.Errorf("cannot export over the active config")
+	}
+	if err = os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+	if err = os.WriteFile(destPath, conf.ExportTOML(cfg), 0600); err != nil {
+		return err
+	}
 
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return fmt.Errorf("create destination directory: %w", err)
-	}
-
-	dst, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("create destination file: %w", err)
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("copy config file: %w", err)
-	}
 	slog.Info("config exported", "dest", destPath)
 	return nil
 }
@@ -962,6 +1292,8 @@ func (a *App) SelectImportFile() (string, error) {
 // It validates the file first, then stops all running tunnels, replaces the
 // config file, and restarts auto-start tunnels.
 func (a *App) ImportConfig(srcPath string) error {
+	a.configGate.Lock()
+	defer a.configGate.Unlock()
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
@@ -970,35 +1302,32 @@ func (a *App) ImportConfig(srcPath string) error {
 		return fmt.Errorf("source path is empty")
 	}
 
-	// Validate: can we parse it as a valid config?
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
 		return fmt.Errorf("read source file: %w", err)
 	}
-	if _, err := conf.ParseConfigTOML(data); err != nil {
+	imported, err := conf.ParseConfigTOML(data)
+	if err != nil {
 		return fmt.Errorf("invalid config file: %w", err)
 	}
-
-	// Stop all running tunnels.
-	if a.tunnel != nil {
-		a.tunnel.Shutdown()
+	running := a.tunnel.RunningIDs()
+	a.tunnel.Shutdown()
+	_, err = a.storage.Update(func(c *conf.Config) error {
+		baseline, baselines := c.SyncBaseline, c.SyncBaselines
+		*c = *imported
+		c.SyncBaseline, c.SyncBaselines = baseline, baselines
+		for i := range c.Tunnels {
+			c.Tunnels[i].Status = "stopped"
+			c.Tunnels[i].LastError = ""
+		}
+		return nil
+	})
+	if err != nil {
+		for _, id := range running {
+			_, _ = a.tunnel.Toggle(id, a.tunnelStartLimit)
+		}
+		return err
 	}
-
-	// Overwrite config file atomically.
-	tmpPath := a.storage.Path() + ".import.tmp"
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
-		return fmt.Errorf("write temp config: %w", err)
-	}
-	if err := os.Rename(tmpPath, a.storage.Path()); err != nil {
-		return fmt.Errorf("replace config file: %w", err)
-	}
-
-	// Reinitialise biz layer so the new config takes effect.
-	a.jumper = biz.NewJumperBiz(a.storage)
-	a.group = biz.NewGroupBiz(a.storage)
-	a.tunnel = biz.NewTunnelBiz(a.storage)
-
-	// Restart auto-start tunnels.
 	_ = a.tunnel.StartAutoStart(a.tunnelStartLimit())
 
 	slog.Info("config imported", "src", srcPath)
@@ -1013,21 +1342,7 @@ func (a *App) OpenConfigDir() error {
 	}
 	dir := filepath.Dir(a.storage.Path())
 
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", dir)
-	case "windows":
-		cmd = exec.Command("explorer", dir)
-	default:
-		// Most desktop Linux environments provide xdg-open.
-		cmd = exec.Command("xdg-open", dir)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("open config dir: %w", err)
-	}
-	return nil
+	return openLocalDirectory(dir)
 }
 
 // OpenReportEmail opens the default mail client with a prefilled report draft.
