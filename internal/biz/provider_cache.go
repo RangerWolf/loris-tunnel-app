@@ -17,6 +17,9 @@ import (
 
 const providerCacheTTL = 24 * time.Hour
 
+// Invalidate stale Dev Tunnel access metadata produced by the old ACL parser.
+const providerCacheVersion = 2
+
 // Only UI metadata is cached. Connection/start/delete validation uses the live clients.
 type providerSnapshot struct {
 	ResourceAt map[string]time.Time   `json:"resourceAt,omitempty"`
@@ -39,8 +42,8 @@ func (b *TunnelBiz) providerCachePath(provider, account string) string {
 func readProviderSnapshot(path string) providerSnapshot {
 	var snapshot providerSnapshot
 	raw, err := os.ReadFile(path)
-	if err != nil || json.Unmarshal(raw, &snapshot) != nil || snapshot.Version != 1 {
-		return providerSnapshot{Version: 1}
+	if err != nil || json.Unmarshal(raw, &snapshot) != nil || snapshot.Version != providerCacheVersion {
+		return providerSnapshot{Version: providerCacheVersion}
 	}
 	return snapshot
 }
@@ -55,7 +58,7 @@ func writeProviderSnapshot(path string, snapshot providerSnapshot) {
 }
 
 func saveProviderSnapshot(path string, snapshot providerSnapshot) error {
-	snapshot.Version = 1
+	snapshot.Version = providerCacheVersion
 	// Never persist observations of remote connections as if they were current.
 	for i := range snapshot.Dev {
 		snapshot.Dev[i].HostConnections = 0

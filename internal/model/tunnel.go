@@ -44,13 +44,17 @@ type DevTunnelConfig struct {
 	TunnelPort    int    `json:"tunnelPort,omitempty" toml:"tunnel_port,omitempty"`
 	LastPublicURL string `json:"lastPublicUrl,omitempty" toml:"last_public_url,omitempty"`
 	TunnelID      string `json:"tunnelId" toml:"tunnel_id"`
-	LocalHost     string `json:"localHost" toml:"local_host"`
-	LocalPort     int    `json:"localPort" toml:"local_port"`
-	Protocol      string `json:"protocol" toml:"protocol"`
-	Access        string `json:"access" toml:"access"`
-	Expiration    string `json:"expiration,omitempty" toml:"expiration,omitempty"`
-	Region        string `json:"region,omitempty" toml:"region,omitempty"`
-	Account       string `json:"account,omitempty" toml:"account,omitempty"`
+	// TunnelName is the requested custom id for a tunnel that does not exist
+	// yet. After a successful create the actual id is stored in TunnelID and
+	// this field is cleared.
+	TunnelName string `json:"tunnelName,omitempty" toml:"tunnel_name,omitempty"`
+	LocalHost  string `json:"localHost" toml:"local_host"`
+	LocalPort  int    `json:"localPort" toml:"local_port"`
+	Protocol   string `json:"protocol" toml:"protocol"`
+	Access     string `json:"access" toml:"access"`
+	Expiration string `json:"expiration,omitempty" toml:"expiration,omitempty"`
+	Region     string `json:"region,omitempty" toml:"region,omitempty"`
+	Account    string `json:"account,omitempty" toml:"account,omitempty"`
 }
 
 // CloudflareTunnelConfig is one locally-managed named tunnel.
@@ -71,8 +75,18 @@ type FRPTunnelConfig struct {
 	Domain     string `json:"domain" toml:"domain"`
 }
 
+// ReconnectInfo is transient runtime diagnostics, never configuration.
+type ReconnectInfo struct {
+	Kind         string   `json:"kind"`
+	Attempt      int      `json:"attempt"`
+	DelaySeconds float64  `json:"delaySeconds"`
+	HostIDs      []string `json:"hostIds,omitempty"`
+	Detail       string   `json:"detail,omitempty"`
+}
+
 // Tunnel is a persisted connection. Empty Provider means an older SSH config.
 type Tunnel struct {
+	Reconnect         *ReconnectInfo          `json:"reconnect,omitempty" toml:"-"`
 	FRP               *FRPTunnelConfig        `json:"frp,omitempty" toml:"frp,omitempty"`
 	OriginState       string                  `json:"originState,omitempty" toml:"-"`
 	LatencyState      string                  `json:"latencyState,omitempty" toml:"-"`

@@ -98,7 +98,7 @@ func TestProviderMetadataCacheExpiryCorruptionAndMutations(t *testing.T) {
 	b := metadataCacheBiz(t, dir)
 	b.dev = devtunnel.NewClient(filepath.Join(dir, "missing-cli"))
 	path := b.providerCachePath("devtunnel", "alice/github")
-	snapshot := providerSnapshot{Version: 1, ListedAt: time.Now(), Dev: []devtunnel.Resource{{ID: "one.usw3", Access: "private", PortsKnown: true}}}
+	snapshot := providerSnapshot{Version: providerCacheVersion, ListedAt: time.Now(), Dev: []devtunnel.Resource{{ID: "one.usw3", Access: "private", PortsKnown: true}}}
 	snapshot.markResource("one.usw3")
 	if err := saveProviderSnapshot(path, snapshot); err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestProviderMetadataCacheCloudflareAndZones(t *testing.T) {
 	cert := filepath.Join(dir, "cert.pem")
 	writeCacheTestFile(t, cert, "account-a-secret-certificate")
 	path := b.cloudflareCachePath()
-	snapshot := providerSnapshot{Version: 1, ListedAt: time.Now(), ZonesAt: time.Now(), Cloudflare: []cloudflared.Resource{{ID: cloudflareUUID, Name: "web", CreatedAt: "2026-01-01", Connections: 3, CredentialReady: true}}, Zones: []cloudflared.Zone{{ID: "zone", Name: "example.com"}}}
+	snapshot := providerSnapshot{Version: providerCacheVersion, ListedAt: time.Now(), ZonesAt: time.Now(), Cloudflare: []cloudflared.Resource{{ID: cloudflareUUID, Name: "web", CreatedAt: "2026-01-01", Connections: 3, CredentialReady: true}}, Zones: []cloudflared.Zone{{ID: "zone", Name: "example.com"}}}
 	snapshot.markResource(cloudflareUUID)
 	if err := saveProviderSnapshot(path, snapshot); err != nil {
 		t.Fatal(err)

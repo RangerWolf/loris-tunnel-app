@@ -73,7 +73,7 @@ func TestRegionNames(t *testing.T) {
 func TestCreatePersistentRegion(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "args.txt")
 	client := NewClient(regionScript(t, logPath, "match"))
-	id, err := client.CreatePersistent(context.Background(), false, "1h", "auto")
+	id, err := client.CreatePersistent(context.Background(), false, "1h", "auto", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestCreatePersistentRegion(t *testing.T) {
 	}
 
 	os.WriteFile(logPath, nil, 0600)
-	id, err = client.CreatePersistent(context.Background(), true, "1h", "usw3")
+	id, err = client.CreatePersistent(context.Background(), true, "1h", "usw3", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestCreatePersistentRegion(t *testing.T) {
 		t.Fatal(args)
 	}
 
-	if _, err := client.CreatePersistent(context.Background(), false, "1h", "https://evil.example"); err == nil {
+	if _, err := client.CreatePersistent(context.Background(), false, "1h", "https://evil.example", ""); err == nil {
 		t.Fatal("arbitrary region was accepted")
 	}
 }
@@ -115,7 +115,7 @@ func TestCreatePersistentRegion(t *testing.T) {
 func TestCreatePersistentRejectsRegionMismatch(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "args.txt")
 	client := NewClient(regionScript(t, logPath, "mismatch"))
-	_, err := client.CreatePersistent(context.Background(), false, "1h", "euw")
+	_, err := client.CreatePersistent(context.Background(), false, "1h", "euw", "")
 	if err == nil || !strings.Contains(err.Error(), "created in eun1 instead of euw; the new tunnel was removed") {
 		t.Fatal(err)
 	}

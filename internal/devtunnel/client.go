@@ -41,6 +41,7 @@ type Client struct {
 	hostDir string
 
 	mu            sync.Mutex
+	version       string
 	loginCmd      *exec.Cmd
 	loginPhase    string
 	loginURL      string
@@ -89,6 +90,9 @@ func (c *Client) Inspect(ctx context.Context) (Status, error) {
 		return status, nil
 	}
 	status.Version = ParseVersion(versionOut)
+	c.mu.Lock()
+	c.version = status.Version
+	c.mu.Unlock()
 	userOut, userErr := c.run(ctx, path, "user", "show", "-j")
 	status.AccountState, status.AccountLabel, status.Detail = ParseAccount(userOut, userErr)
 	return status, nil
@@ -225,7 +229,9 @@ func (c *Client) Logout(ctx context.Context) error {
 
 // CreatePersistent creates one persistent tunnel and returns its id.
 // An empty region keeps Microsoft's automatic cluster selection.
-func (c *Client) CreatePersistent(ctx context.Context, public bool, expiration, region string) (string, error) {
+// An empty name asks Microsoft for a random id; a non-empty name must pass
+// NormalizeTunnelName and is sent as the CLI positional tunnel id.
+func (c *Client) CreatePersistent(ctx context.Context, public bool, expiration, region, name string) (string, error) {
 	expiration, err := NormalizeExpiration(expiration)
 	if err != nil {
 		return "", err
@@ -234,11 +240,23 @@ func (c *Client) CreatePersistent(ctx context.Context, public bool, expiration, 
 	if err != nil {
 		return "", err
 	}
+	if strings.TrimSpace(name) != "" {
+		name, err = NormalizeTunnelName(name)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		name = ""
+	}
 	path, _, err := c.resolve()
 	if err != nil {
 		return "", fmt.Errorf("dev tunnel cli is not installed")
 	}
-	args := []string{"create", "--expiration", expiration, "-j"}
+	args := []string{"create"}
+	if name != "" {
+		args = append(args, name)
+	}
+	args = append(args, "--expiration", expiration, "-j")
 	stdin := ""
 	if region != "" {
 		uri, uriErr := c.serviceURI(ctx, region)
@@ -258,11 +276,15 @@ func (c *Client) CreatePersistent(ctx context.Context, public bool, expiration, 
 		args = append(args, "--allow-anonymous")
 	}
 	out, err := c.runInput(ctx, path, stdin, args...)
+	if err != nil {
+		text := out + " " + err.Error()
+		if tunnelNameConflict(text) {
+			return "", fmt.Errorf("%w: create dev tunnel %s: %s", ErrTunnelNameConflict, name, clip(redactSecrets(text), 300))
+		}
+		return "", fmt.Errorf("create dev tunnel: %s", clip(redactSecrets(text), 300))
+	}
 	id := ParseTunnelID(out)
 	if id == "" {
-		if err != nil {
-			return "", fmt.Errorf("create dev tunnel: %s", clip(redactSecrets(out+" "+err.Error()), 300))
-		}
 		return "", fmt.Errorf("create dev tunnel did not return a tunnel id")
 	}
 	if !validTunnelID(id) {

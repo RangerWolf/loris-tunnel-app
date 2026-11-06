@@ -10,6 +10,8 @@ import ProviderRowActions from '../common/ProviderRowActions.vue'
 import RegionDropdown from '../common/RegionDropdown.vue'
 import { uniquePublicURLs } from '../../utils/public-urls'
 import { devTunnelCluster, regionLabel } from '../../utils/devtunnel-region'
+import { isValidDevTunnelName, normalizeDevTunnelName } from '../../utils/devtunnel-name'
+import { devTunnelNameOwner, sameTunnelID } from '../../utils/tunnel-bindings'
 import { writeTextToClipboard } from '../../utils/clipboard'
 import { PreviewProviderResourceDeletion } from '../../../wailsjs/go/main/App'
 
@@ -129,6 +131,18 @@ const createAmount = ref(30)
 const createUnit = ref('d')
 const createRegion = ref('')
 const createError = ref('')
+const createName = ref('')
+const createNameValue = computed(() => normalizeDevTunnelName(createName.value))
+const createNameOwner = computed(() => devTunnelNameOwner(props.tunnels, createNameValue.value, null))
+const createNameRemoteConflict = computed(() => Boolean(createNameValue.value)
+  && (props.resources?.items || []).some(item => sameTunnelID(item.id, createNameValue.value)))
+const createNameError = computed(() => {
+  if (!createNameValue.value) return ''
+  if (!isValidDevTunnelName(createNameValue.value)) return t('app.modals.tunnel.customIdInvalid')
+  if (createNameOwner.value) return t('app.modals.tunnel.customIdOccupied', { name: createNameOwner.value.name })
+  if (createNameRemoteConflict.value) return t('app.modals.tunnel.customIdRemoteConflict')
+  return ''
+})
 const deleteTarget = ref(null)
 const deleteError = ref('')
 const deletePreview = ref(null)
@@ -196,6 +210,7 @@ function openCreate() {
   createUnit.value = 'd'
   createRegion.value = ''
   createError.value = ''
+  createName.value = ''
   createOpen.value = true
   emit('reset-created')
   emit('load-regions')
@@ -203,10 +218,24 @@ function openCreate() {
 
 function submitCreate() {
   createError.value = ''
+  const name = createNameValue.value
+  if (name && !isValidDevTunnelName(name)) {
+    createError.value = t('app.modals.tunnel.customIdInvalid')
+    return
+  }
+  if (createNameOwner.value) {
+    createError.value = t('app.modals.tunnel.customIdOccupied', { name: createNameOwner.value.name })
+    return
+  }
+  if (createNameRemoteConflict.value) {
+    createError.value = t('app.modals.tunnel.customIdRemoteConflict')
+    return
+  }
   emit('create-resource', {
     access: createAccess.value,
     expiration: `${createAmount.value}${createUnit.value}`,
     region: createRegion.value || '',
+    tunnelName: name,
   })
 }
 
@@ -477,8 +506,23 @@ function onAccountAction(key) {
             </div>
           </template>
           <template v-else>
-            <label class="form-label">{{ t('app.providers.idColumn') }}</label>
-            <p class="text-muted mb-0">{{ t('app.providers.idAuto') }}</p>
+            <label class="form-label" for="devtunnel-create-id">{{ t('app.providers.idColumn') }}</label>
+            <input
+              id="devtunnel-create-id"
+              v-model="createName"
+              class="form-control"
+              :class="{ 'is-invalid': Boolean(createNameError) }"
+              type="text"
+              autocomplete="off"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+              :placeholder="t('app.modals.tunnel.customIdPlaceholder')"
+              aria-describedby="devtunnel-create-id-hint devtunnel-create-id-error"
+              :aria-invalid="Boolean(createNameError)"
+            />
+            <div id="devtunnel-create-id-hint" class="field-note">{{ t('app.providers.idCustomHint') }}</div>
+            <div v-if="createNameError" id="devtunnel-create-id-error" class="field-warning" aria-live="polite">{{ createNameError }}</div>
             <div class="row g-3 mt-1">
               <div class="col-6">
                 <label class="form-label">{{ t('app.modals.tunnel.expiration') }}</label>

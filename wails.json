@@ -3,7 +3,7 @@
   "name": "loris-tunnel",
   "outputfilename": "loris-tunnel",
   "info": {
-    "productVersion": "2.0.0"
+    "productVersion": "2.1.0"
   },
   "frontend:install": "pnpm install",
   "frontend:build": "pnpm run build",

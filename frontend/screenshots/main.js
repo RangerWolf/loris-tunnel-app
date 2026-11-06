@@ -13,7 +13,9 @@ import '../src/styles/theme.css'
 import i18n from '../src/i18n'
 import Preview from './Preview.vue'
 
-i18n.global.locale.value = 'en'
+const locale = new URLSearchParams(location.search).get('locale')
+i18n.global.locale.value = locale === 'zh-CN' ? 'zh-CN' : 'en'
+document.documentElement.lang = i18n.global.locale.value
 installPreviewBridge()
 createApp(Preview).use(i18n).mount('#app')
 await nextTick()

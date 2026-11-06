@@ -59,76 +59,43 @@ func assertServiceOpen(t *testing.T, r *devServiceRuntime) {
 	}
 }
 
-func TestSharedDevServicesIndependentStopAndURLs(t *testing.T) {
+func TestDevServiceRejectsSecondMemberWithoutRestartingFirst(t *testing.T) {
 	b, hosts := fakeServiceBiz(0)
-	first, second := serviceRuntime(b, 1, 8080, 8080), serviceRuntime(b, 2, 8081, 8080)
-	if err := b.startDevService(t.Context(), first); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.startDevService(t.Context(), second); err != nil {
-		t.Fatal(err)
-	}
-	if len(*hosts) != 2 || len((*hosts)[1].targets) != 2 {
-		t.Fatal("ports were not combined")
-	}
-	if first.PublicURL() != "https://abc-8080.usw3.devtunnels.ms" || second.PublicURL() != "https://abc-8081.usw3.devtunnels.ms" {
-		t.Fatal(first.PublicURL(), second.PublicURL())
-	}
-	if err := first.Stop(); err != nil {
-		t.Fatal(err)
-	}
-	assertServiceOpen(t, second)
-	if targets := (*hosts)[2].targets; len(targets) != 1 || targets[0].Port != 8081 || targets[0].LocalPort != 8080 {
-		t.Fatal(targets)
-	}
-	if err := second.Stop(); err != nil {
-		t.Fatal(err)
-	}
-	if err := second.Stop(); err != nil {
-		t.Fatal(err)
-	}
-	if len(b.devSessions) != 0 {
-		t.Fatal("shared process retained after last stop")
-	}
-}
-
-func TestSharedDevServicesFailedJoinRestoresExistingService(t *testing.T) {
-	b, hosts := fakeServiceBiz(2)
-	first, second := serviceRuntime(b, 1, 8080, 8080), serviceRuntime(b, 2, 8081, 8081)
+	first, second := serviceRuntime(b, 1, 8080, 8080), serviceRuntime(b, 2, 9090, 9090)
 	if err := b.startDevService(t.Context(), first); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.startDevService(t.Context(), second); err == nil {
-		t.Fatal("failed join reported success")
+		t.Fatal("second service joined exclusive ID")
 	}
 	assertServiceOpen(t, first)
-	if len(*hosts) != 3 || len((*hosts)[2].targets) != 1 || (*hosts)[2].targets[0].Port != 8080 {
-		t.Fatal("original service not restored")
+	if len(*hosts) != 1 {
+		t.Fatal("first service was restarted")
 	}
-	if second.Err() == nil {
-		t.Fatal("failed service has no error")
+	if first.PublicURL() != "https://abc-8080.usw3.devtunnels.ms" {
+		t.Fatal(first.PublicURL())
 	}
-	_ = first.Stop()
+	if err := first.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.devSessions) != 0 {
+		t.Fatal("session retained after stop")
+	}
 }
 
-func TestSharedDevServicesFailedStopNeverRestoresPausedPort(t *testing.T) {
-	b, hosts := fakeServiceBiz(3)
-	first, second := serviceRuntime(b, 1, 8080, 8080), serviceRuntime(b, 2, 8081, 8081)
-	if err := b.startDevService(t.Context(), first); err != nil {
+func TestDevServiceFailedStartCanRetry(t *testing.T) {
+	b, hosts := fakeServiceBiz(1)
+	if err := b.startDevService(t.Context(), serviceRuntime(b, 1, 8080, 8080)); err == nil {
+		t.Fatal("expected host failure")
+	}
+	retry := serviceRuntime(b, 1, 8080, 8080)
+	if err := b.startDevService(t.Context(), retry); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.startDevService(t.Context(), second); err != nil {
-		t.Fatal(err)
+	if len(*hosts) != 2 {
+		t.Fatal("retry did not create a host")
 	}
-	if err := first.Stop(); err == nil {
-		t.Fatal("failed restart hidden")
-	}
-	if len((*hosts)[2].targets) != 1 || (*hosts)[2].targets[0].Port != 8081 {
-		t.Fatal("paused port was restored")
-	}
-	if second.Err() == nil {
-		t.Fatal("surviving row should report shared process failure")
-	}
+	_ = retry.Stop()
 }
 
 func TestSharedDevServicesCancellationAndProcessFailure(t *testing.T) {
@@ -156,7 +123,7 @@ func TestSharedDevServicesCancellationAndProcessFailure(t *testing.T) {
 	}
 }
 
-func TestDevServiceBindingIgnoresProtocolButDistinguishesHostsAndIDs(t *testing.T) {
+func TestDevServiceBindingExclusivelyOwnsID(t *testing.T) {
 	b := metadataCacheBiz(t, t.TempDir())
 	payload := func(name, id, host, protocol string) model.TunnelPayload {
 		return model.TunnelPayload{Name: name, Provider: model.ProviderDevTunnel, Mode: protocol, LocalHost: host, LocalPort: 8080, Status: "stopped", DevTunnelIDMode: "bind", DevTunnel: &model.DevTunnelConfig{TunnelID: id, Access: "private"}}
@@ -165,33 +132,21 @@ func TestDevServiceBindingIgnoresProtocolButDistinguishesHostsAndIDs(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Create(payload("duplicate", "abc", "127.0.0.1", "https")); err == nil {
-		t.Fatal("protocol bypassed duplicate service check")
+	for _, p := range []model.TunnelPayload{payload("protocol", "ABC", "127.0.0.1", "https"), payload("host", "abc.usw3", "127.0.0.2", "auto")} {
+		if _, err := b.Create(p); err == nil {
+			t.Fatal("duplicate ID accepted", p)
+		}
 	}
-	second, err := b.Create(payload("second", "abc.usw3", "127.0.0.2", "https"))
-	if err != nil {
-		t.Fatal("different host rejected", err)
+	p := payload("port", "abc.usw3", "127.0.0.1", "http")
+	p.LocalPort = 7676
+	if _, err := b.Create(p); err == nil {
+		t.Fatal("different port bypassed exclusive binding")
 	}
-	if _, err = b.Create(payload("other-id", "other.usw3", "127.0.0.1", "https")); err != nil {
-		t.Fatal("different ID rejected", err)
-	}
-	if _, err = b.Update(first.ID, payload("first", "abc.usw3", "127.0.0.1", "https")); err != nil {
-		t.Fatal("self edit rejected", err)
-	}
-	a, err := b.allocateDevTunnelPort(first.ID, "abc.usw3", "127.0.0.1", 8080)
-	if err != nil {
+	if _, err := b.Create(payload("other", "other.usw3", "127.0.0.1", "http")); err != nil {
 		t.Fatal(err)
 	}
-	c, err := b.allocateDevTunnelPort(second.ID, "abc.usw3", "127.0.0.2", 8080)
-	if err != nil {
+	if _, err := b.Update(first.ID, payload("first", "abc.usw3", "127.0.0.1", "https")); err != nil {
 		t.Fatal(err)
-	}
-	if a == c {
-		t.Fatal("two targets received the same public port")
-	}
-	again, err := b.allocateDevTunnelPort(first.ID, "abc.usw3", "127.0.0.1", 8080)
-	if err != nil || a != again {
-		t.Fatal("public port was not stable", a, again, err)
 	}
 }
 
@@ -213,5 +168,50 @@ func TestCloudflareHostnameDuplicateIgnoresCaseAndExcludesSelf(t *testing.T) {
 	}
 	if _, err = b.Update(first.ID, payload("first", cloudflareUUID, "dev.example.com")); err != nil {
 		t.Fatal("self edit rejected", err)
+	}
+}
+
+func TestDevSessionReconnectDiagnosticsAndURLSnapshot(t *testing.T) {
+	b, hosts := fakeServiceBiz(0)
+	r := serviceRuntime(b, 1, 8080, 8080)
+	if err := b.startDevService(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	defer r.Stop()
+	<-r.Events() // Initial session readiness.
+	host := (*hosts)[0]
+	host.events <- forward.RuntimeEvent{Type: forward.RuntimeEventDisconnected, Err: fmt.Errorf("disconnected"), Reconnect: &model.ReconnectInfo{Kind: "host_conflict", Attempt: 2, HostIDs: []string{"peer"}}}
+	select {
+	case <-r.Events():
+	case <-time.After(time.Second):
+		t.Fatal("no disconnect event")
+	}
+	info := r.ReconnectInfo()
+	if info == nil || info.Attempt != 2 {
+		t.Fatalf("missing diagnostics: %+v", info)
+	}
+	info.HostIDs[0] = "mutated"
+	if r.ReconnectInfo().HostIDs[0] != "peer" {
+		t.Fatal("diagnostics escaped as shared mutable state")
+	}
+	// The event carries the URL for that attempt, independent of the host's
+	// current URL, which may already belong to a later disconnected attempt.
+	host.events <- forward.RuntimeEvent{Type: forward.RuntimeEventReconnected, PublicURL: "https://new-8080.usw3.devtunnels.ms"}
+	select {
+	case <-r.Events():
+	case <-time.After(time.Second):
+		t.Fatal("no recovery event")
+	}
+	if r.PublicURL() != "https://new-8080.usw3.devtunnels.ms" || r.ReconnectInfo() != nil {
+		t.Fatalf("stale recovery state: %s %+v", r.PublicURL(), r.ReconnectInfo())
+	}
+	host.events <- forward.RuntimeEvent{Type: forward.RuntimeEventReconnected, PublicURL: "https://new-8080.usw3.devtunnels.ms, https://new-9090.usw3.devtunnels.ms"}
+	select {
+	case <-r.Done():
+		if r.Err() == nil {
+			t.Fatal("extra port accepted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unsafe recovery not rejected")
 	}
 }

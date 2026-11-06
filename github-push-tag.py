@@ -3,27 +3,29 @@
 github-push-tag.py
 
 创建并推送 Git tag 到 GitHub。
-- 无参数：从 frontend/src/App.vue 的 appMeta.version 抽取版本作为 tag，交互确认后 push。
+- 无参数：从 wails.json 的 info.productVersion 读取版本作为 tag，交互确认后 push。
 - 一个参数：使用该参数作为 tag，交互确认后 push。
 """
 
-import re
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-APP_VUE = SCRIPT_DIR / "frontend" / "src" / "App.vue"
+WAILS_CONFIG = SCRIPT_DIR / "wails.json"
 
 
-def extract_version_from_app_vue():
-    """从 App.vue 中解析 appMeta.version 的值。"""
-    text = APP_VUE.read_text(encoding="utf-8")
-    # 匹配 version: '...' 或 version: "..."
-    m = re.search(r"version:\s*['\"]([^'\"]+)['\"]", text)
-    if not m:
-        sys.exit("错误：在 App.vue 中未找到 appMeta.version。")
-    return m.group(1).strip()
+def extract_version_from_wails_config():
+    """从 wails.json 中读取 info.productVersion。"""
+    try:
+        config = json.loads(WAILS_CONFIG.read_text(encoding="utf-8"))
+        version = config["info"]["productVersion"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        sys.exit(f"错误：无法读取 wails.json 中的 info.productVersion：{exc}")
+    if not isinstance(version, str) or not version.strip():
+        sys.exit("错误：wails.json 中的 info.productVersion 必须是非空字符串。")
+    return version.strip()
 
 
 def normalize_tag(version: str) -> str:
@@ -43,7 +45,7 @@ def run_cmd(cmd, check=True):
 def main():
     if len(sys.argv) > 2:
         print("用法: python github-push-tag.py [tag]")
-        print("  无参数: 从 App.vue 读取 version 作为 tag")
+        print("  无参数: 从 wails.json 读取 info.productVersion 作为 tag")
         print("  一个参数: 使用该参数作为 tag")
         sys.exit(1)
 
@@ -53,9 +55,9 @@ def main():
             sys.exit("错误: tag 不能为空。")
         print(f"使用自定义 tag: {tag}")
     else:
-        version = extract_version_from_app_vue()
+        version = extract_version_from_wails_config()
         tag = normalize_tag(version)
-        print(f"从 App.vue 读取 version: {version}")
+        print(f"从 wails.json 读取 info.productVersion: {version}")
         print(f"生成 tag: {tag}")
 
     print()

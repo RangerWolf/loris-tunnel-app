@@ -1,5 +1,6 @@
 <script setup>
-import { devTunnelServiceOwner } from '../../utils/tunnel-bindings'
+import { devTunnelServiceOwner, devTunnelNameOwner, sameTunnelID } from '../../utils/tunnel-bindings'
+import { normalizeDevTunnelName, DEV_TUNNEL_NAME_PATTERN } from '../../utils/devtunnel-name'
 import LocalServiceAddress from './LocalServiceAddress.vue'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -21,6 +22,9 @@ const props = defineProps({
 const emit = defineEmits(['manage', 'refresh', 'select-id', 'open-url', 'test-regions'])
 const { t } = useI18n()
 const copyError = ref('')
+const nameTouched = ref(false)
+
+const CUSTOM_ID_SENTINEL = '__custom__'
 
 const publicURLs = computed(() => devTunnelPortURLs(props.tunnelForm.publicUrl, props.tunnelForm.tunnelPort || props.tunnelForm.localPort))
 
@@ -30,26 +34,37 @@ const showBoundSummary = computed(() => Boolean(props.editingTunnelId && props.t
 const accessLocked = computed(() => props.tunnelForm.tunnelIdMode === 'bind' && Boolean(props.tunnelForm.tunnelId))
 const regionLocked = computed(() => showBoundSummary.value || accessLocked.value)
 const boundRegion = computed(() => regionLabel(props.regionProbe?.regions, devTunnelCluster(props.tunnelForm.tunnelId)) || '—')
-const selectValue = computed(() => (props.tunnelForm.tunnelIdMode === 'bind' ? props.tunnelForm.tunnelId || '' : ''))
-const selectedIDMissing = computed(() => Boolean(selectValue.value) && !(props.resources.items || []).some((item) => item.id === selectValue.value))
+const selectValue = computed(() => {
+  if (props.tunnelForm.tunnelIdMode === 'bind') return props.tunnelForm.tunnelId || ''
+  if (props.tunnelForm.tunnelIdMode === 'custom') return CUSTOM_ID_SENTINEL
+  return ''
+})
+const selectedIDMissing = computed(() => props.tunnelForm.tunnelIdMode !== 'custom'
+  && Boolean(selectValue.value)
+  && !(props.resources.items || []).some((item) => item.id === selectValue.value))
 
-const serviceOwner = computed(() => devTunnelServiceOwner(props.tunnels, props.tunnelForm.tunnelIdMode === 'bind' ? props.tunnelForm.tunnelId : '', props.tunnelForm.localHost, props.tunnelForm.localPort, props.editingTunnelId))
+const customName = computed(() => normalizeDevTunnelName(props.tunnelForm.devTunnelName))
+const customNameError = computed(() => {
+  if (props.tunnelForm.tunnelIdMode !== 'custom') return ''
+  if (!customName.value) return nameTouched.value ? t('app.modals.tunnel.customIdRequired') : ''
+  if (!DEV_TUNNEL_NAME_PATTERN.test(customName.value)) return t('app.modals.tunnel.customIdInvalid')
+  return ''
+})
+const customNameOwner = computed(() => (customName.value
+  ? devTunnelNameOwner(props.tunnels, customName.value, props.editingTunnelId)
+  : null))
+const customNameTakenRemotely = computed(() => Boolean(customName.value)
+  && (props.resources.items || []).some((item) => sameTunnelID(item.id, customName.value)))
 
-function sameDevTunnelID(left, right) {
-  const a = String(left || '').trim().toLowerCase()
-  const b = String(right || '').trim().toLowerCase()
-  if (!a || !b) return false
-  if (a === b) return true
-  const [aShort, aCluster] = a.split('.')
-  const [bShort, bCluster] = b.split('.')
-  if (!aShort || aShort !== bShort) return false
-  if (!a.includes('.') || !b.includes('.')) return true
-  return aCluster === bCluster
+const serviceOwner = computed(() => devTunnelServiceOwner(props.tunnels, props.tunnelForm.tunnelIdMode === 'bind' ? props.tunnelForm.tunnelId : '', props.editingTunnelId))
+
+function optionOwner(id) {
+  return devTunnelServiceOwner(props.tunnels, id, props.editingTunnelId)
 }
 
 function optionLabel(item) {
-  const owners = props.tunnels.filter(tunnel => sameDevTunnelID(tunnel?.devTunnel?.tunnelId, item.id))
-  return owners.length ? t('app.modals.tunnel.sharedIdOption', { id: item.id, count: owners.length }) : item.id
+  const owner = optionOwner(item.id)
+  return owner ? t('app.modals.tunnel.occupiedIdOption', { id: item.id, name: owner.name }) : item.id
 }
 
 function selectAccess(next) {
@@ -66,6 +81,11 @@ function onExpirationUnitChange() {
 function onSelect(event) {
   const value = event?.target?.value || ''
   emit('select-id', value)
+}
+
+function onCustomNameInput(event) {
+  nameTouched.value = true
+  props.tunnelForm.devTunnelName = String(event?.target?.value || '').toLowerCase()
 }
 
 </script>
@@ -91,17 +111,38 @@ function onSelect(event) {
         @change="onSelect"
       >
         <option value="">{{ $t('app.modals.tunnel.autoCreate') }}</option>
-        <option v-if="selectedIDMissing" :value="selectValue">{{ selectValue }}</option>
+        <option :value="CUSTOM_ID_SENTINEL">{{ $t('app.modals.tunnel.customIdOption') }}</option>
+        <option v-if="selectedIDMissing" :value="selectValue" :disabled="Boolean(optionOwner(selectValue))">{{ selectValue }}</option>
         <optgroup v-if="(resources.items || []).length" :label="$t('app.modals.tunnel.existingGroup')">
           <option
             v-for="item in resources.items"
             :key="item.id"
             :value="item.id"
+            :disabled="Boolean(optionOwner(item.id))"
           >
             {{ optionLabel(item) }}
           </option>
         </optgroup>
       </select>
+      <template v-if="tunnelForm.tunnelIdMode === 'custom' && !showBoundSummary">
+        <input
+          id="devtunnel-custom-id"
+          class="form-control"
+          :class="{ 'is-invalid': Boolean(customNameError) }"
+          type="text"
+          :value="tunnelForm.devTunnelName"
+          autocapitalize="none"
+          autocorrect="off"
+          spellcheck="false"
+          :placeholder="t('app.modals.tunnel.customIdPlaceholder')"
+          @input="onCustomNameInput"
+          @blur="nameTouched = true"
+        />
+        <div v-if="customNameError" class="field-warning">{{ customNameError }}</div>
+        <div v-else-if="customNameOwner" class="field-warning">{{ t('app.modals.tunnel.customIdOccupied', { name: customNameOwner.name }) }}</div>
+        <div v-else-if="customNameTakenRemotely" class="field-warning">{{ t('app.modals.tunnel.customIdRemoteConflict') }}</div>
+        <div v-else class="field-note">{{ t('app.modals.tunnel.customIdHint') }}</div>
+      </template>
       <div v-if="tunnelForm.resourceNote && !resourceStatusActive" class="field-note">{{ tunnelForm.resourceNote }}</div>
       <div v-if="!signedIn && !showBoundSummary && !resourceStatusActive" class="field-note">{{ $t('app.modals.tunnel.signInForIds') }}</div>
       <div v-if="resources.state === 'loading'" class="field-note">{{ $t('app.modals.tunnel.tunnelIdLoading') }}</div>
@@ -111,10 +152,15 @@ function onSelect(event) {
       </div>
       <div v-if="tunnelForm.resourceError" class="field-warning">{{ tunnelForm.resourceError }}</div>
     </div>
-    <LocalServiceAddress
-      :tunnel-form="tunnelForm"
-      :hint="serviceOwner ? $t('app.modals.tunnel.duplicateService', { name: serviceOwner.name }) : ''"
-    />
+    <div class="col-12">
+      <div class="field-note mt-0">{{ $t('app.modals.tunnel.singleIdHint') }}</div>
+      <div class="field-warning">{{ $t('app.modals.tunnel.singlePortCleanup') }}</div>
+      <div v-if="serviceOwner" class="field-warning">{{ $t('app.modals.tunnel.duplicateService', { name: serviceOwner.name }) }}</div>
+    </div>
+    <LocalServiceAddress :tunnel-form="tunnelForm" />
+    <div class="col-12">
+      <div class="field-note mt-0">{{ $t('app.modals.tunnel.currentPublicPort') }}：{{ tunnelForm.tunnelPort || $t('app.modals.tunnel.portAtStart') }}</div>
+    </div>
     <div class="col-12">
       <label class="form-label">{{ $t('app.modals.tunnel.access') }}</label>
       <div class="devtunnel-access" role="radiogroup" :aria-label="$t('app.modals.tunnel.access')">
@@ -122,14 +168,14 @@ function onSelect(event) {
           type="button"
           class="devtunnel-access-option"
           role="radio"
-          :aria-checked="tunnelForm.access !== 'public'"
-          :class="{ 'is-selected': tunnelForm.access !== 'public' }"
+          :aria-checked="tunnelForm.access === 'private'"
+          :class="{ 'is-selected': tunnelForm.access === 'private' }"
           :disabled="accessLocked"
           @click="selectAccess('private')"
         >
           <i class="bi bi-lock" aria-hidden="true" />
           <span>{{ $t('app.modals.tunnel.accessPrivate') }}</span>
-          <i v-if="tunnelForm.access !== 'public'" class="bi bi-check-lg" aria-hidden="true" />
+          <i v-if="tunnelForm.access === 'private'" class="bi bi-check-lg" aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -145,8 +191,9 @@ function onSelect(event) {
           <i v-if="tunnelForm.access === 'public'" class="bi bi-check-lg" aria-hidden="true" />
         </button>
       </div>
-      <div v-if="tunnelForm.access === 'public'" class="field-warning">{{ $t('app.modals.tunnel.publicWarning') }}</div>
       <div v-if="accessLocked" class="field-note">{{ $t('app.modals.tunnel.accessReadOnly') }}</div>
+      <div v-if="tunnelForm.access === 'public'" class="field-warning">{{ $t('app.modals.tunnel.publicWarning') }}</div>
+      <div v-if="accessLocked && tunnelForm.access === 'unknown'" class="field-warning">{{ $t('app.modals.tunnel.access') }}：{{ $t('app.providers.accessUnknown') }}</div>
     </div>
     <div v-if="regionLocked" class="col-12">
       <div class="field-note mb-0">{{ $t('app.modals.tunnel.regionReadOnly', { name: boundRegion }) }}</div>

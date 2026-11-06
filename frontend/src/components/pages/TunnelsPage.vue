@@ -1,4 +1,5 @@
 <script setup>
+import { devTunnelReconnectText } from '../../utils/devtunnel-reconnect'
 import { frpState, frpAddress } from '../../utils/frp'
 import { latencyLabel, latencyTitle, formatLatencyLabel } from '../../utils/tunnel-latency'
 import IconActionButton from '../common/IconActionButton.vue'
@@ -373,7 +374,7 @@ function getMenuToggleButtonClass(status) {
 }
 
 function getStatusLabelKey(status) {
-  if (status === 'reconnecting') return 'app.frp.reconnecting'
+  if (status === 'reconnecting') return 'app.tunnels.reconnect.label'
   switch (status) {
     case 'running':
       return 'app.tunnels.status.running'
@@ -488,6 +489,7 @@ function getTunnelLatencyTitle(tunnel) {
 }
 
 function errorDetailText(tunnel) {
+  if (tunnel?.provider === 'devtunnel' && tunnel.status === 'reconnecting' && tunnel.reconnect) return devTunnelReconnectText(tunnel.reconnect, t)
   const text = String(tunnel?.lastError || '').trim()
   if (text) return text
   if (tunnel?.status === 'auth_required') return t('app.tunnels.status.auth_required')

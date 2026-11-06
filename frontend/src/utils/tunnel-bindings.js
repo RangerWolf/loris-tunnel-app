@@ -1,4 +1,4 @@
-function sameTunnelID(left, right) {
+export function sameTunnelID(left, right) {
   const a = String(left || '').trim().toLowerCase()
   const b = String(right || '').trim().toLowerCase()
   if (!a || !b) return false
@@ -8,17 +8,23 @@ function sameTunnelID(left, right) {
   return aName === bName && (!aCluster || !bCluster)
 }
 
-function serviceHost(value) {
-  return String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '')
-}
-
-export function devTunnelServiceOwner(tunnels, id, host, port, editingID) {
-  if (!id || !host || !Number(port)) return null
+export function devTunnelServiceOwner(tunnels, id, editingID) {
+  if (!id) return null
   return tunnels.find(tunnel => Number(tunnel.id) !== Number(editingID)
     && tunnel.provider === 'devtunnel'
-    && sameTunnelID(tunnel.devTunnel?.tunnelId, id)
-    && serviceHost(tunnel.devTunnel?.localHost || tunnel.localHost) === serviceHost(host)
-    && Number(tunnel.devTunnel?.localPort || tunnel.localPort) === Number(port)) || null
+    && sameTunnelID(tunnel.devTunnel?.tunnelId, id)) || null
+}
+
+// devTunnelNameOwner finds another local Dev Tunnel service that already
+// binds the requested id or is waiting to create it. The remote create call
+// remains the final authority; this only feeds an early warning.
+export function devTunnelNameOwner(tunnels, name, editingID) {
+  const normalized = String(name || '').trim().toLowerCase()
+  if (!normalized) return null
+  return tunnels.find(tunnel => Number(tunnel.id) !== Number(editingID)
+    && tunnel.provider === 'devtunnel'
+    && (sameTunnelID(tunnel.devTunnel?.tunnelId, normalized)
+      || String(tunnel.devTunnel?.tunnelName || '').trim().toLowerCase() === normalized)) || null
 }
 
 export function cloudflareHostnameOwner(tunnels, hostname, editingID) {

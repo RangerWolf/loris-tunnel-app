@@ -55,6 +55,8 @@ type urlRuntime interface {
 }
 
 type TunnelBiz struct {
+	// ponytail: serialize config edits and start registration; split per record if contention appears.
+	devConfigMu        sync.Mutex
 	cliMu              sync.Mutex
 	cliManagers        map[string]*climaint.Manager
 	cliChanging        map[string]bool
@@ -120,6 +122,8 @@ func (b *TunnelBiz) List() ([]model.Tunnel, error) {
 }
 
 func (b *TunnelBiz) Create(payload model.TunnelPayload) (model.Tunnel, error) {
+	b.devConfigMu.Lock()
+	defer b.devConfigMu.Unlock()
 	payload = normalizeTunnelPayload(payload)
 	if payload.Provider == model.ProviderCloudflare {
 		b.cloudflareAuthMu.Lock()
@@ -165,6 +169,8 @@ func (b *TunnelBiz) Create(payload model.TunnelPayload) (model.Tunnel, error) {
 }
 
 func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, error) {
+	b.devConfigMu.Lock()
+	defer b.devConfigMu.Unlock()
 	if id <= 0 {
 		return model.Tunnel{}, fmt.Errorf("invalid tunnel id")
 	}
@@ -172,6 +178,10 @@ func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, e
 		return model.Tunnel{}, fmt.Errorf("tunnel is running, stop it before editing")
 	}
 
+	if current, ok := b.tunnelByID(id); ok && current.DevTunnel != nil && current.DevTunnel.TunnelID != "" {
+		unlock := b.lockResource(resourceLockKey(model.ProviderDevTunnel, current.DevTunnel.TunnelID))
+		defer unlock()
+	}
 	payload = normalizeTunnelPayload(payload)
 	if payload.Provider == model.ProviderCloudflare {
 		b.cloudflareAuthMu.Lock()
@@ -186,6 +196,7 @@ func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, e
 	var previousTunnelID string
 	var previousCloudflareID string
 	var previousHostname string
+	var devPortChanged bool
 	_, err := b.storage.Update(func(cfg *conf.Config) error {
 		if err := validateTunnelPayload(payload); err != nil {
 			return err
@@ -229,7 +240,14 @@ func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, e
 		if err := b.validateFRPBinding(cfg.Tunnels, id, payload); err != nil {
 			return err
 		}
+		devPortChanged = payload.Provider == model.ProviderDevTunnel && cfg.Tunnels[idx].LocalPort != payload.LocalPort
 		updated = tunnelFromPayload(id, payload, &cfg.Tunnels[idx])
+		if updated.DevTunnel != nil {
+			if err := ensureDevTunnelIDAvailable(cfg.Tunnels, id, model.TunnelPayload{Provider: updated.ProviderName(), DevTunnel: updated.DevTunnel}); err != nil {
+				return err
+			}
+		}
+
 		if previousTunnelID != "" && updated.DevTunnel != nil && !devtunnel.SameTunnelID(previousTunnelID, updated.DevTunnel.TunnelID) {
 			return fmt.Errorf("tunnel id cannot be changed")
 		}
@@ -253,7 +271,7 @@ func (b *TunnelBiz) Update(id int, payload model.TunnelPayload) (model.Tunnel, e
 		nextHostname = updated.Cloudflare.Hostname
 	}
 	cloudflareIDChanged := (previousCloudflareID != "" || nextCloudflareID != "") && !cloudflared.SameTunnelID(previousCloudflareID, nextCloudflareID)
-	if !devtunnel.SameTunnelID(previousTunnelID, nextTunnelIDValue) || cloudflareIDChanged || previousHostname != nextHostname {
+	if devPortChanged || !devtunnel.SameTunnelID(previousTunnelID, nextTunnelIDValue) || cloudflareIDChanged || previousHostname != nextHostname {
 		b.forgetURL(id)
 	}
 
@@ -507,6 +525,9 @@ func (b *TunnelBiz) AttachRuntimeState(items []model.Tunnel) {
 				items[i].Status = "stopped"
 			}
 		}
+		if source, ok := runs[items[i].ID].(interface{ ReconnectInfo() *model.ReconnectInfo }); ok {
+			items[i].Reconnect = source.ReconnectInfo()
+		}
 		if items[i].Status != "running" && items[i].Status != "reconnecting" {
 			items[i].LatencyMs = 0
 			if items[i].ProviderName() == model.ProviderCloudflare && items[i].Cloudflare != nil {
@@ -575,6 +596,8 @@ func (b *TunnelBiz) StartPreviouslyRunning(ids []int, maxRunning int) error {
 	return b.startSelected(maxRunning, selected)
 }
 func (b *TunnelBiz) startSelected(maxRunning int, selected map[int]bool) error {
+	b.devConfigMu.Lock()
+	defer b.devConfigMu.Unlock()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	limit := effectiveRunningLimit(maxRunning)
@@ -593,6 +616,11 @@ func (b *TunnelBiz) startSelected(maxRunning int, selected map[int]bool) error {
 				eligible = selected[t.ID]
 			}
 			if running || starting || !eligible || b.cliChanging[t.ProviderName()] {
+				continue
+			}
+			if err := ensureDevTunnelIDAvailable(cfg.Tunnels, t.ID, model.TunnelPayload{Provider: t.ProviderName(), DevTunnel: t.DevTunnel}); err != nil {
+				t.Status = "error"
+				t.LastError = err.Error()
 				continue
 			}
 			if limit > 0 && len(b.runs)+len(b.starting)+len(tasks) >= limit {
@@ -715,6 +743,23 @@ func (b *TunnelBiz) Shutdown() {
 }
 
 func (b *TunnelBiz) beginAsyncStart(tunnel model.Tunnel, jumpers []model.Jumper, maxRunning int) (model.Tunnel, error) {
+	b.devConfigMu.Lock()
+	defer b.devConfigMu.Unlock()
+	if tunnel.ProviderName() == model.ProviderDevTunnel {
+		cfg, err := b.storage.Load()
+		if err != nil {
+			return model.Tunnel{}, err
+		}
+		current, ok := findTunnelByID(cfg.Tunnels, tunnel.ID)
+		if !ok {
+			return model.Tunnel{}, ErrTunnelNotFound
+		}
+		tunnel = current
+		if err := ensureDevTunnelIDAvailable(cfg.Tunnels, tunnel.ID, model.TunnelPayload{Provider: tunnel.ProviderName(), DevTunnel: tunnel.DevTunnel}); err != nil {
+			return b.updateStatus(tunnel.ID, "error", err.Error())
+		}
+	}
+
 	b.mu.Lock()
 	if b.cliChanging[tunnel.ProviderName()] {
 		b.mu.Unlock()
@@ -768,6 +813,7 @@ func (b *TunnelBiz) watchRuntime(id int, run tunnelRuntime) {
 	}
 
 	events := run.Events()
+	disconnected := false
 	for {
 		select {
 		case <-done:
@@ -777,13 +823,18 @@ func (b *TunnelBiz) watchRuntime(id int, run tunnelRuntime) {
 				b.mu.Unlock()
 				return
 			}
+			provider := b.runProvider[id]
 			b.cancelPublicLatency(id)
 			delete(b.runs, id)
 			delete(b.runProvider, id)
 
 			if run.Err() != nil {
 				slog.Warn("tunnel runtime exited with error", "tunnel_id", id, "err", run.Err())
-				_, _ = b.updateStatus(id, "error", errReason(run.Err()))
+				status := "error"
+				if provider == model.ProviderDevTunnel {
+					status = providerFailureStatus(run.Err())
+				}
+				_, _ = b.updateStatus(id, status, errReason(run.Err()))
 			} else {
 				slog.Info("tunnel runtime exited", "tunnel_id", id)
 			}
@@ -802,13 +853,22 @@ func (b *TunnelBiz) watchRuntime(id int, run tunnelRuntime) {
 			}
 			switch evt.Type {
 			case forward.RuntimeEventDisconnected:
-				slog.Warn("tunnel runtime disconnected", "tunnel_id", id, "err", evt.Err)
+				if evt.Reconnect == nil || evt.Reconnect.Attempt == 1 {
+					slog.Warn("tunnel runtime disconnected", "tunnel_id", id, "err", evt.Err)
+				} else if !disconnected {
+					slog.Warn("tunnel runtime disconnected", "tunnel_id", id, "attempt", evt.Reconnect.Attempt)
+				}
 				status := "error"
-				if b.runProvider[id] == model.ProviderFRP {
+				if b.runProvider[id] == model.ProviderFRP || b.runProvider[id] == model.ProviderDevTunnel {
 					status = "reconnecting"
 				}
-				_, _ = b.updateStatus(id, status, errReason(evt.Err))
+				// Retry progress is runtime-only; persist only the transition.
+				if evt.Reconnect == nil || !disconnected {
+					_, _ = b.updateStatus(id, status, errReason(evt.Err))
+				}
+				disconnected = true
 			case forward.RuntimeEventReconnected:
+				disconnected = false
 				slog.Info("tunnel runtime reconnected", "tunnel_id", id)
 				_, _ = b.updateStatus(id, "running", "")
 			}
@@ -963,12 +1023,18 @@ func normalizeTunnelPayload(payload model.TunnelPayload) model.TunnelPayload {
 		}
 		payload.DevTunnel.TunnelID = strings.TrimSpace(payload.DevTunnel.TunnelID)
 		payload.DevTunnel.Account = strings.TrimSpace(payload.DevTunnel.Account)
+		payload.DevTunnel.TunnelName = strings.TrimSpace(payload.DevTunnel.TunnelName)
 		payload.DevTunnelIDMode = strings.ToLower(strings.TrimSpace(payload.DevTunnelIDMode))
 		if payload.DevTunnelIDMode == "auto" {
 			payload.DevTunnel.TunnelID = ""
+			payload.DevTunnel.TunnelName = ""
 		}
 		if payload.DevTunnelIDMode == "bind" {
 			payload.DevTunnel.Region = ""
+			payload.DevTunnel.TunnelName = ""
+		}
+		if payload.DevTunnelIDMode == "custom" {
+			payload.DevTunnel.TunnelName = strings.ToLower(payload.DevTunnel.TunnelName)
 		}
 		payload.Cloudflare = nil
 		return payload
@@ -1154,7 +1220,7 @@ func providerFailureStatus(err error) string {
 	switch {
 	case strings.Contains(text, "not installed"), strings.Contains(text, "credentials are missing"):
 		return "needs_setup"
-	case strings.Contains(text, "login expired"), strings.Contains(text, "not signed"), strings.Contains(text, "authentication is required"):
+	case strings.Contains(text, "login expired"), strings.Contains(text, "login token expired"), strings.Contains(text, "login required"), strings.Contains(text, "not logged in"), strings.Contains(text, "token expired"), strings.Contains(text, "unauthorized"), strings.Contains(text, "not signed"), strings.Contains(text, "authentication is required"):
 		return "auth_required"
 	default:
 		return "error"
@@ -1243,6 +1309,13 @@ func (b *TunnelBiz) newStartedDevRuntime(task *model.Tunnel) (tunnelRuntime, err
 	b.devStartCancel[task] = cancel
 	b.mu.Unlock()
 	defer func() { b.mu.Lock(); delete(b.devStartCancel, task); b.mu.Unlock() }()
+	if current, ok := b.tunnelByID(task.ID); !ok {
+		return nil, ErrTunnelNotFound
+	} else if current.DevTunnel != nil {
+		if err := b.checkDevTunnelOwner(task.ID, current.DevTunnel.TunnelID); err != nil {
+			return nil, err
+		}
+	}
 	if err := b.dev.Preflight(ctx); err != nil {
 		return nil, err
 	}
@@ -1263,15 +1336,20 @@ func (b *TunnelBiz) newStartedDevRuntime(task *model.Tunnel) (tunnelRuntime, err
 	if id != "" && !devtunnel.ValidTunnelID(id) {
 		return nil, fmt.Errorf("invalid dev tunnel id")
 	}
-	if id != "" && b.devTunnelServiceBoundElsewhere(task.ID, id, task.LocalHost, port) {
-		return nil, fmt.Errorf("dev tunnel service is already configured for this Tunnel ID")
-	}
 	if id == "" {
 		expiration, err := devtunnel.NormalizeExpiration(cfg.Expiration)
 		if err != nil {
 			return nil, err
 		}
-		id, err = b.dev.CreatePersistent(ctx, cfg.Access == "public", expiration, cfg.Region)
+		name := strings.TrimSpace(cfg.TunnelName)
+		if name != "" {
+			name, err = devtunnel.NormalizeTunnelName(name)
+			if err != nil {
+				return nil, err
+			}
+			cfg.TunnelName = name
+		}
+		id, err = b.dev.CreatePersistent(ctx, cfg.Access == "public", expiration, cfg.Region, name)
 		if err != nil {
 			return nil, err
 		}
@@ -1289,23 +1367,14 @@ func (b *TunnelBiz) newStartedDevRuntime(task *model.Tunnel) (tunnelRuntime, err
 			return nil, err
 		}
 		cfg.TunnelID = id
-		publishedPort, err := b.allocateDevTunnelPort(task.ID, id, task.LocalHost, port)
-		if err != nil {
-			return nil, err
-		}
-		cfg.TunnelPort = publishedPort
-		if err := b.dev.EnsurePort(ctx, id, publishedPort, protocol); err != nil {
-			return nil, err
-		}
-		b.updateDevResourceCache(devtunnel.Resource{ID: id, Access: cfg.Access, Expiration: expiration, PortsKnown: true, Ports: []devtunnel.Port{{Number: cfg.TunnelPort, Protocol: protocol}}}, false)
-	} else if err := b.prepareExistingDevTunnel(ctx, task.ID, cfg, id, port, protocol); err != nil {
+
+	}
+	unlock := b.lockResource(resourceLockKey(model.ProviderDevTunnel, id))
+	defer unlock()
+	if err := b.prepareExistingDevTunnel(ctx, task.ID, cfg, id, port, protocol); err != nil {
 		return nil, err
-	} else {
-		id = strings.TrimSpace(cfg.TunnelID)
 	}
-	if b.devTunnelServiceBoundElsewhere(task.ID, id, task.LocalHost, port) {
-		return nil, fmt.Errorf("dev tunnel service is already configured for this Tunnel ID")
-	}
+	id = strings.TrimSpace(cfg.TunnelID)
 	targetHost := cfg.LocalHost
 	if targetHost == "" {
 		targetHost = task.LocalHost
@@ -1318,7 +1387,7 @@ func (b *TunnelBiz) newStartedDevRuntime(task *model.Tunnel) (tunnelRuntime, err
 	}
 	b.inflight[task.ID] = runtime
 	b.mu.Unlock()
-	if err := b.startDevService(ctx, runtime); err != nil {
+	if err := b.startDevServiceLocked(ctx, runtime); err != nil {
 		b.mu.Lock()
 		delete(b.inflight, task.ID)
 		b.mu.Unlock()
@@ -1327,41 +1396,115 @@ func (b *TunnelBiz) newStartedDevRuntime(task *model.Tunnel) (tunnelRuntime, err
 	return runtime, nil
 }
 
+// Caller holds the resource lock through reconciliation and host startup.
 func (b *TunnelBiz) prepareExistingDevTunnel(ctx context.Context, selfID int, cfg *model.DevTunnelConfig, id string, port int, protocol string) error {
+	check := func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if b.startCanceled(selfID) {
+			return context.Canceled
+		}
+		current, ok := b.tunnelByID(selfID)
+		if !ok {
+			return ErrTunnelNotFound
+		}
+		if current.DevTunnel == nil || !devtunnel.SameTunnelID(current.DevTunnel.TunnelID, id) || current.LocalPort != port || current.LocalHost != cfg.LocalHost || current.Mode != protocol {
+			return fmt.Errorf("service configuration changed during startup")
+		}
+		return b.checkDevTunnelOwner(selfID, id)
+	}
+	if err := check(); err != nil {
+		return err
+	}
 	detail := b.dev.GetResource(ctx, id)
 	if detail.State != devtunnel.ResourceReady {
 		return devTunnelResourceError(detail)
 	}
+	if !detail.Resource.PortsKnown {
+		return fmt.Errorf("remote port list is unknown")
+	}
 	qualified := strings.TrimSpace(detail.Resource.ID)
-	if qualified != "" && devtunnel.ValidTunnelID(qualified) && qualified != id {
-		if err := b.persistDevTunnelID(selfID, qualified, ""); err != nil {
-			return err
+	if qualified != "" && devtunnel.ValidTunnelID(qualified) {
+		if !devtunnel.SameTunnelID(id, qualified) {
+			return fmt.Errorf("remote Tunnel ID does not match requested ID")
 		}
-		cfg.TunnelID = qualified
 		id = qualified
 	}
-
-	publishedPort, err := b.allocateDevTunnelPort(selfID, id, cfg.LocalHost, port)
+	if err := check(); err != nil {
+		return err
+	}
+	published, err := b.allocateDevTunnelPort(cfg.LocalHost, port)
 	if err != nil {
 		return err
 	}
-	cfg.TunnelPort = publishedPort
-	port = publishedPort
-	switch err := devtunnel.MatchPort(detail.Resource, port, protocol); {
-	case err == nil:
-		b.updateDevResourceCache(detail.Resource, false)
-		return nil
-	case errors.Is(err, devtunnel.ErrNoPorts):
-		if err := b.dev.EnsurePort(ctx, id, port, protocol); err != nil {
+	// Validate the retained port before deleting anything else.
+	match := devtunnel.MatchPort(detail.Resource, published, protocol)
+	if match != nil && !errors.Is(match, devtunnel.ErrNoPorts) {
+		return match
+	}
+	for _, remote := range detail.Resource.Ports {
+		if remote.Number == published {
+			continue
+		}
+		if err := check(); err != nil {
 			return err
 		}
-		detail.Resource.PortsKnown = true
-		detail.Resource.Ports = append(detail.Resource.Ports, devtunnel.Port{Number: port, Protocol: protocol})
-		b.updateDevResourceCache(detail.Resource, false)
-		return nil
-	default:
+		if err := b.dev.DeletePort(ctx, id, remote.Number); err != nil {
+			return fmt.Errorf("delete extra public port %d: %w", remote.Number, err)
+		}
+	}
+	if errors.Is(match, devtunnel.ErrNoPorts) {
+		if err := check(); err != nil {
+			return err
+		}
+		if err := b.dev.EnsurePort(ctx, id, published, protocol); err != nil {
+			return err
+		}
+	}
+	if err := check(); err != nil {
 		return err
 	}
+	verified := b.dev.GetResource(ctx, id)
+	if verified.State != devtunnel.ResourceReady {
+		return devTunnelResourceError(verified)
+	}
+	if !verified.Resource.PortsKnown || len(verified.Resource.Ports) != 1 || verified.Resource.Ports[0].Number != published {
+		return fmt.Errorf("remote ports do not match sole public port %d after cleanup: %v", published, verified.Resource.Ports)
+	}
+	if err := devtunnel.MatchPort(verified.Resource, published, protocol); err != nil {
+		return err
+	}
+	if err := check(); err != nil {
+		return err
+	}
+	_, err = b.storage.Update(func(config *conf.Config) error {
+		if err := ensureDevTunnelIDAvailable(config.Tunnels, selfID, model.TunnelPayload{Provider: model.ProviderDevTunnel, DevTunnel: &model.DevTunnelConfig{TunnelID: id}}); err != nil {
+			return err
+		}
+		for i := range config.Tunnels {
+			if config.Tunnels[i].ID == selfID {
+				target := config.Tunnels[i].DevTunnel
+				if target == nil || !devtunnel.SameTunnelID(target.TunnelID, id) || config.Tunnels[i].LocalPort != port || config.Tunnels[i].LocalHost != cfg.LocalHost {
+					return fmt.Errorf("service configuration changed during startup")
+				}
+				target.TunnelID = id
+				target.TunnelPort = published
+				target.LastPublicURL = ""
+				return nil
+			}
+		}
+		return ErrTunnelNotFound
+	})
+	if err != nil {
+		return err
+	}
+	cfg.TunnelID = id
+	cfg.TunnelPort = published
+	cfg.LastPublicURL = ""
+	b.forgetURL(selfID)
+	b.updateDevResourceCache(verified.Resource, false)
+	return nil
 }
 
 func (b *TunnelBiz) startCanceled(id int) bool {
@@ -1371,23 +1514,12 @@ func (b *TunnelBiz) startCanceled(id int) bool {
 	return !ok
 }
 
-func (b *TunnelBiz) devTunnelServiceBoundElsewhere(selfID int, tunnelID, host string, port int) bool {
-	if strings.TrimSpace(tunnelID) == "" {
-		return false
-	}
-	cfg, err := b.storage.Load()
+func (b *TunnelBiz) checkDevTunnelOwner(selfID int, id string) error {
+	config, err := b.storage.Load()
 	if err != nil {
-		return true
+		return err
 	}
-	for _, item := range cfg.Tunnels {
-		if item.ID == selfID || item.ProviderName() != model.ProviderDevTunnel || item.DevTunnel == nil {
-			continue
-		}
-		if devtunnel.SameTunnelID(item.DevTunnel.TunnelID, tunnelID) && sameServiceAddress(item.LocalHost, item.LocalPort, host, port) {
-			return true
-		}
-	}
-	return false
+	return ensureDevTunnelIDAvailable(config.Tunnels, selfID, model.TunnelPayload{Provider: model.ProviderDevTunnel, DevTunnel: &model.DevTunnelConfig{TunnelID: id}})
 }
 
 func (b *TunnelBiz) persistDevTunnelID(id int, tunnelID, account string) error {
@@ -1400,6 +1532,8 @@ func (b *TunnelBiz) persistDevTunnelID(id int, tunnelID, account string) error {
 				cfg.Tunnels[i].DevTunnel = &model.DevTunnelConfig{}
 			}
 			cfg.Tunnels[i].DevTunnel.TunnelID = tunnelID
+			// The pending create request was fulfilled by this id.
+			cfg.Tunnels[i].DevTunnel.TunnelName = ""
 			if account != "" {
 				cfg.Tunnels[i].DevTunnel.Account = account
 			}
@@ -1431,16 +1565,34 @@ func ensureDevTunnelIDAvailable(tunnels []model.Tunnel, selfID int, payload mode
 		return nil
 	}
 	id := strings.TrimSpace(payload.DevTunnel.TunnelID)
-	if id == "" {
+	name := strings.ToLower(strings.TrimSpace(payload.DevTunnel.TunnelName))
+	if id == "" && name == "" {
 		return nil
 	}
+	var owners []string
 	for _, item := range tunnels {
 		if item.ID == selfID || item.ProviderName() != model.ProviderDevTunnel || item.DevTunnel == nil {
 			continue
 		}
-		if devtunnel.SameTunnelID(item.DevTunnel.TunnelID, id) && sameServiceAddress(item.LocalHost, item.LocalPort, payload.LocalHost, payload.LocalPort) {
-			return fmt.Errorf("dev tunnel service %s is already used by %s (protocol does not distinguish services)", net.JoinHostPort(payload.LocalHost, strconv.Itoa(payload.LocalPort)), item.Name)
+		otherID := strings.TrimSpace(item.DevTunnel.TunnelID)
+		otherName := strings.ToLower(strings.TrimSpace(item.DevTunnel.TunnelName))
+		taken := false
+		if id != "" {
+			taken = devtunnel.SameTunnelID(otherID, id) || (otherName != "" && devtunnel.SameTunnelID(otherName, id))
 		}
+		if !taken && name != "" {
+			taken = devtunnel.SameTunnelID(otherID, name) || (otherName != "" && devtunnel.SameTunnelID(otherName, name))
+		}
+		if taken {
+			owners = append(owners, item.Name)
+		}
+	}
+	if len(owners) > 0 {
+		requested := id
+		if requested == "" {
+			requested = name
+		}
+		return fmt.Errorf("Tunnel ID %s is already used by %s; remove extra local records without deleting remote resources, then create a separate Tunnel ID", requested, strings.Join(owners, ", "))
 	}
 	return nil
 }
@@ -1549,7 +1701,7 @@ func validateDevTunnelPayload(payload model.TunnelPayload) error {
 	if payload.DevTunnel != nil && payload.DevTunnel.Access != "" {
 		access = payload.DevTunnel.Access
 	}
-	if access != "private" && access != "public" {
+	if access != "private" && access != "public" && !(access == "unknown" && payload.DevTunnelIDMode == "bind") {
 		return fmt.Errorf("unsupported dev tunnel access: %s", access)
 	}
 	expiration := ""
@@ -1567,7 +1719,7 @@ func validateDevTunnelPayload(payload model.TunnelPayload) error {
 		return err
 	}
 	switch payload.DevTunnelIDMode {
-	case "", "auto", "bind":
+	case "", "auto", "custom", "bind":
 	default:
 		return fmt.Errorf("unsupported dev tunnel id mode")
 	}
@@ -1576,8 +1728,24 @@ func validateDevTunnelPayload(payload model.TunnelPayload) error {
 			return fmt.Errorf("dev tunnel id is required")
 		}
 	}
+	if payload.DevTunnelIDMode == "custom" {
+		if payload.DevTunnel == nil {
+			return fmt.Errorf("dev tunnel id is required")
+		}
+		if strings.TrimSpace(payload.DevTunnel.TunnelID) != "" {
+			return fmt.Errorf("a custom dev tunnel id cannot be combined with an existing tunnel id")
+		}
+		if _, err := devtunnel.NormalizeTunnelName(payload.DevTunnel.TunnelName); err != nil {
+			return err
+		}
+	}
 	if payload.DevTunnel != nil && payload.DevTunnel.TunnelID != "" && !devtunnel.ValidTunnelID(payload.DevTunnel.TunnelID) {
 		return fmt.Errorf("invalid dev tunnel id")
+	}
+	if payload.DevTunnel != nil && payload.DevTunnel.TunnelName != "" {
+		if _, err := devtunnel.NormalizeTunnelName(payload.DevTunnel.TunnelName); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1630,16 +1798,30 @@ func tunnelFromPayload(id int, payload model.TunnelPayload, previous *model.Tunn
 		switch payload.DevTunnelIDMode {
 		case "auto":
 			cfg.TunnelID = ""
+			cfg.TunnelName = ""
 		case "bind":
 			cfg.TunnelID = strings.TrimSpace(cfg.TunnelID)
+			cfg.TunnelName = ""
+		case "custom":
+			name, nameErr := devtunnel.NormalizeTunnelName(cfg.TunnelName)
+			if nameErr != nil {
+				name = strings.ToLower(strings.TrimSpace(cfg.TunnelName))
+			}
+			cfg.TunnelName = name
+			cfg.TunnelID = ""
 		default:
 			if previous != nil && previous.DevTunnel != nil && cfg.TunnelID == "" {
 				cfg.TunnelID = previous.DevTunnel.TunnelID
 			}
+			cfg.TunnelName = strings.ToLower(strings.TrimSpace(cfg.TunnelName))
+			if cfg.TunnelID != "" {
+				// An inherited existing id replaces any pending create request.
+				cfg.TunnelName = ""
+			}
 		}
 		cfg.LastPublicURL = ""
 		cfg.TunnelPort = 0
-		if previous != nil && previous.DevTunnel != nil && devtunnel.SameTunnelID(previous.DevTunnel.TunnelID, cfg.TunnelID) {
+		if previous != nil && previous.DevTunnel != nil && previous.LocalPort == payload.LocalPort && devtunnel.SameTunnelID(previous.DevTunnel.TunnelID, cfg.TunnelID) {
 			cfg.LastPublicURL = previous.DevTunnel.LastPublicURL
 			cfg.TunnelPort = previous.DevTunnel.TunnelPort
 		}

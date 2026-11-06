@@ -270,7 +270,7 @@ test('provider pages share one resource layout and keep existing actions', async
       resources: { state: 'ready', items: [{ id: 'cached-cf-id', name: 'old', credentialReady: false }] },
     }))
     assert.match(cfOut, /未认证/)
-    assert.match(cfOut, /<thead>[\s\S]*?本地配置域名[\s\S]*?<\/thead>/)
+    assert.match(cfOut, /<thead>[\s\S]*?已配置域名[\s\S]*?<\/thead>/)
     assert.match(cfOut, /<td colspan="5" class="provider-state-cell" role="status">登录后/)
 
     assert.doesNotMatch(cfOut, /cached-cf-id|>缺失</)

@@ -24,7 +24,7 @@ Loris Tunnel 将 SSH 端口转发和本地服务发布集中到一个图形工�
 
 本文描述当前源码分支的能力。已发布安装包可能包含较早的功能，请以所安装版本的发布说明为准。
 
-![总览](screenshots/screenshot-v2-overview-light.png)
+![总览](screenshots/screenshot-v2-cn-overview-light.png)
 
 ## 截图
 
@@ -32,22 +32,22 @@ Loris Tunnel 将 SSH 端口转发和本地服务发布集中到一个图形工�
 
 | 隧道管理 | SSH 跳板机 |
 | --- | --- |
-| ![隧道管理](screenshots/screenshot-v2-tunnels-light.png) | ![SSH 跳板机](screenshots/screenshot-v2-providers-ssh-light.png) |
+| ![隧道管理](screenshots/screenshot-v2-cn-tunnels-light.png) | ![SSH 跳板机](screenshots/screenshot-v2-cn-providers-ssh-light.png) |
 | 按分组和 Provider 管理隧道。 | 管理认证方式和关联隧道。 |
 
 | Dev Tunnel | Cloudflare |
 | --- | --- |
-| ![Dev Tunnel](screenshots/screenshot-v2-providers-devtunnel-light.png) | ![Cloudflare](screenshots/screenshot-v2-providers-cloudflare-light.png) |
+| ![Dev Tunnel](screenshots/screenshot-v2-cn-providers-devtunnel-light.png) | ![Cloudflare](screenshots/screenshot-v2-cn-providers-cloudflare-light.png) |
 | 管理 CLI 安装、登录及隧道资源。 | 管理域名区域授权和命名隧道。 |
 
 | FRP | 云备份 |
 | --- | --- |
-| ![FRP](screenshots/screenshot-v2-providers-frp-light.png) | ![云备份](screenshots/screenshot-v2-sync-light.png) |
+| ![FRP](screenshots/screenshot-v2-cn-providers-frp-light.png) | ![云备份](screenshots/screenshot-v2-cn-sync-light.png) |
 | 配置 FRP 客户端与服务器连接。 | 查看备份版本、设备和连接状态。 |
 
 | 日志 | 设置 |
 | --- | --- |
-| ![日志](screenshots/screenshot-v2-logs-light.png) | ![设置](screenshots/screenshot-v2-config-light.png) |
+| ![日志](screenshots/screenshot-v2-cn-logs-light.png) | ![设置](screenshots/screenshot-v2-cn-config-light.png) |
 | 查看连接事件、警告和错误。 | 配置外观、启动行为和数据管理。 |
 
 现有截图工作流见[截图说明](screenshots/README.md)。

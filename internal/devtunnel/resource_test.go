@@ -29,6 +29,27 @@ func TestParseResourceListQualifiesClusterAndPorts(t *testing.T) {
 	}
 }
 
+func TestParseResourceAccessControls(t *testing.T) {
+	cases := []struct {
+		name, output, want string
+	}{
+		{"show array", `{"tunnel":{"tunnelId":"abc.usw3","accessControl":[{"type":"Anonymous","scopes":["connect"]}]}}`, "public"},
+		{"list entries", `{"tunnelId":"abc.usw3","accessControlEntries":[{"type":"Anonymous","scopes":["connect"]}]}`, "public"},
+		{"legacy entries", `{"tunnelId":"abc.usw3","accessControl":{"entries":[{"type":"Anonymous"}]}}`, "public"},
+		{"non-connect anonymous", `{"tunnelId":"abc.usw3","accessControl":[{"type":"Anonymous","scopes":["manage"]}]}`, "private"},
+		{"empty ACL", `{"tunnelId":"abc.usw3","accessControl":[]}`, "private"},
+		{"missing ACL", `{"tunnelId":"abc.usw3"}`, "unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resource, err := parseResourceOutput(tc.output)
+			if err != nil || resource.Access != tc.want {
+				t.Fatalf("access = %q, want %q; err = %v", resource.Access, tc.want, err)
+			}
+		})
+	}
+}
+
 func TestParseResourceDoesNotInventURL(t *testing.T) {
 	items, err := ParseResourceList(`[{"tunnelId":"abc123.usw3","ports":[{"portNumber":8080,"protocol":"https"}]}]`)
 	if err != nil {
@@ -143,13 +164,14 @@ func TestListResourcesReadsAccessForKnownPorts(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "devtunnel")
 	script := `#!/bin/sh
 if [ "$1" = "list" ]; then
- echo '[{"tunnelId":"public","ports":[]},{"tunnelId":"private","ports":[]},{"tunnelId":"failed","ports":[]}]'
+ echo '[{"tunnelId":"public","ports":[]},{"tunnelId":"private","ports":[]},{"tunnelId":"legacy","ports":[]},{"tunnelId":"failed","ports":[]}]'
  exit 0
 fi
 if [ "$1 $2" = "access list" ]; then
  case "$3" in
- public) echo '[{"type":"Anonymous"}]' ;;
- private) echo '{"entries":[]}' ;;
+ public) echo '{"accessControlEntries":[{"type":"Anonymous","scopes":["connect"]}]}' ;;
+ private) echo '{"accessControlEntries":[]}' ;;
+ legacy) echo '[{"type":"Anonymous"}]' ;;
  failed) exit 1 ;;
  esac
  exit $?
@@ -160,10 +182,10 @@ exit 1
 		t.Fatal(err)
 	}
 	result := NewClient(binary).ListResources(context.Background())
-	if result.State != ResourceReady || len(result.Items) != 3 {
+	if result.State != ResourceReady || len(result.Items) != 4 {
 		t.Fatalf("%+v", result)
 	}
-	for i, want := range []string{"public", "private", "unknown"} {
+	for i, want := range []string{"public", "private", "public", "unknown"} {
 		if result.Items[i].Access != want {
 			t.Fatalf("item %d: %+v", i, result.Items[i])
 		}

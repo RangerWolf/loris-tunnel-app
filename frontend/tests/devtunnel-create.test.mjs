@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { test } from 'node:test'
+import { isDevTunnelNameConflict } from '../src/utils/devtunnel-name.js'
 
 const source = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
 function setup(result) {
@@ -15,6 +16,7 @@ function setup(result) {
     regionCreateMessage: (detail) => detail,
     ListDevTunnelResources: () => new Promise((resolve) => { finishList = resolve }),
     t: (key) => key, errorMessage: (err) => err.message,
+    isDevTunnelNameConflict,
   })
   for (const [start, end] of [
     ['async function loadDevTunnelResources(', '\nfunction applyRemoteExpiration('],
@@ -44,6 +46,12 @@ test('failed creation does not add an ID or show success', async () => {
   assert.equal(c.devTunnelCreated.value, null)
   assert.equal(c.devTunnelResources.items.length, 1)
   assert.equal(c.devTunnelCreateError.value, 'creation failed')
+})
+
+test('a name conflict is reported with the localized conflict message', async () => {
+  const { context: c } = setup({ state: 'error', detail: 'dev tunnel name is already in use' })
+  await c.createDevTunnelResource({})
+  assert.equal(c.devTunnelCreateError.value, 'app.modals.tunnel.customIdRemoteConflict')
 })
 
 test('concurrent list requests share one query and a fresh result is reused', async () => {

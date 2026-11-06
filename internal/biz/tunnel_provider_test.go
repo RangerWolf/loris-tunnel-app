@@ -563,13 +563,25 @@ case "$1" in
         exit 1
         ;;
       multi.usw3)
+        if [ -f "` + logPath + `.deleted-3001" ]; then
+          echo '{"tunnelId":"multi","clusterId":"usw3","ports":[{"portNumber":3000,"protocol":"http"}],"hostConnections":0}'
+        else
         echo '{"tunnelId":"multi","clusterId":"usw3","ports":[{"portNumber":3000,"protocol":"http"},{"portNumber":3001,"protocol":"https"}],"hostConnections":0}'
+        fi
         ;;
       one.usw3)
+        if [ -f "` + logPath + `.created-3000" ]; then
+          echo '{"tunnelId":"one","clusterId":"usw3","ports":[{"portNumber":3000,"protocol":"http"}],"hostConnections":0}'
+        else
         echo '{"tunnelId":"one","clusterId":"usw3","ports":[{"portNumber":9090,"protocol":"http"}],"hostConnections":0}'
+        fi
         ;;
       empty.usw3)
+        if [ -f "` + logPath + `.created-8080" ]; then
+          echo '{"tunnelId":"empty","clusterId":"usw3","ports":[{"portNumber":8080,"protocol":"https"}],"hostConnections":0}'
+        else
         echo '{"tunnelId":"empty","clusterId":"usw3","ports":[],"hostConnections":0}'
+        fi
         ;;
       *)
         echo '{"tunnelId":"abc123","clusterId":"usw3","ports":[{"portNumber":3000,"protocol":"http"}],"hostConnections":0}'
@@ -577,6 +589,8 @@ case "$1" in
     esac
     ;;
   port)
+    if [ "$2" = "delete" ]; then touch "` + logPath + `.deleted-$5"; fi
+    if [ "$2" = "create" ]; then touch "` + logPath + `.created-$5"; fi
     exit 0
     ;;
   delete)
@@ -612,6 +626,9 @@ case "$1" in
     ;;
   create)
     echo '{"tunnelId":"abc123"}'
+    ;;
+  show)
+    echo '{"tunnelId":"abc123","ports":[{"portNumber":3000,"protocol":"http"}]}'
     ;;
   port)
     exit 0
@@ -743,41 +760,18 @@ func TestDevTunnelStopCancelsSlowPreparation(t *testing.T) {
 	}
 }
 
-func TestDevTunnelSharedIDRowsRunAndPauseIndependently(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "cli-args.txt")
+func TestDevTunnelSharedIDCreationRejectedWithoutDisturbingOwner(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "args.log")
 	b := newDevTunnelBiz(t, devTunnelResourceScript(logPath))
+	defer b.Shutdown()
 	first := mustCreateBoundDevTunnel(t, b, "first-service", "abc123.usw3", 3000, "auto")
-	second := mustCreateBoundDevTunnel(t, b, "second-service", "abc123.usw3", 3001, "auto")
 	waitDevTunnelRunning(t, b, first.ID)
-	waitDevTunnelRunning(t, b, second.ID)
-	listed, err := b.List()
-	if err != nil {
-		t.Fatal(err)
+	_, err := b.Create(model.TunnelPayload{Name: "second", Provider: model.ProviderDevTunnel, Mode: "auto", LocalHost: "127.0.0.1", LocalPort: 3001, Status: "stopped", DevTunnelIDMode: "bind", DevTunnel: &model.DevTunnelConfig{Access: "private", TunnelID: "abc123.usw3"}})
+	if err == nil || !strings.Contains(err.Error(), "first-service") {
+		t.Fatal("shared ID accepted", err)
 	}
-	for _, item := range listed {
-		want := fmt.Sprintf("-%d.", item.LocalPort)
-		if !strings.Contains(item.PublicURL, want) {
-			t.Fatalf("row %d has another service URL: %s", item.ID, item.PublicURL)
-		}
-		if item.DevTunnel.TunnelPort != item.LocalPort {
-			t.Fatalf("unexpected public port: %+v", item.DevTunnel)
-		}
-	}
-	if _, err = b.Toggle(second.ID, func() int { return MaxRunningTunnels }); err != nil {
-		t.Fatal(err)
-	}
-	waitDevTunnelStatus(t, b, second.ID, "stopped")
 	waitDevTunnelStatus(t, b, first.ID, "running")
-	if err = b.Delete(second.ID); err != nil {
-		t.Fatal(err)
-	}
-	if result := b.DeleteDevTunnelResource(t.Context(), "abc123.usw3"); result.State != "running" && result.State != "linked" {
-		t.Fatal("shared ID deleted while still referenced", result)
-	}
-	if strings.Contains(readCLIArgs(t, logPath), "\ndelete ") {
-		t.Fatal("stopping/deleting a row removed the shared remote ID")
-	}
-	if _, err = b.Toggle(first.ID, func() int { return MaxRunningTunnels }); err != nil {
-		t.Fatal(err)
+	if strings.Contains(readCLIArgs(t, logPath), "port delete") {
+		t.Fatal("failed bind changed remote ports")
 	}
 }

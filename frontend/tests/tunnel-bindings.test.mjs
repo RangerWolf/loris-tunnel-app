@@ -9,16 +9,16 @@ const tunnels = [
   { id: 3, name: 'root', provider: 'cloudflare', cloudflare: { tunnelId: 'cf-root', hostname: 'example.com' } },
 ]
 
-test('Dev Tunnel deduplicates ID + host + port, with protocol excluded', () => {
+test('Dev Tunnel IDs are exclusive regardless of host, port or protocol', () => {
   for (const protocol of ['http', 'https', 'auto']) {
     const records = [{ ...tunnels[0], devTunnel: { ...tunnels[0].devTunnel, protocol } }]
-    assert.equal(devTunnelServiceOwner(records, 'ABC', 'IP1.internal', 8080, null)?.id, 1)
+    assert.equal(devTunnelServiceOwner(records, 'ABC', null)?.id, 1)
   }
-  assert.equal(devTunnelServiceOwner(tunnels, 'abc.usw3', 'ip2.internal', 8080, null), null)
-  assert.equal(devTunnelServiceOwner(tunnels, 'abc.usw3', 'ip1.internal', 8081, null), null)
-  assert.equal(devTunnelServiceOwner(tunnels, 'other.usw3', 'ip1.internal', 8080, null), null)
-  assert.equal(devTunnelServiceOwner(tunnels, 'abc.usw2', 'ip1.internal', 8080, null), null)
-  assert.equal(devTunnelServiceOwner(tunnels, 'abc.usw3', 'ip1.internal', 8080, 1), null)
+  assert.equal(devTunnelServiceOwner(tunnels, 'abc.usw3', null)?.id, 1)
+  assert.equal(devTunnelServiceOwner(tunnels, 'other.usw3', null), null)
+  assert.equal(devTunnelServiceOwner(tunnels, 'abc.usw2', null), null)
+  assert.equal(devTunnelServiceOwner(tunnels, 'abc.usw3', 1), null)
+  assert.equal(devTunnelServiceOwner(tunnels, '', null), null)
 })
 
 test('Cloudflare checks complete hostname including root domains and ignores case and scheme', () => {

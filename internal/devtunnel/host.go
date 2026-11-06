@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"strconv"
@@ -15,13 +17,12 @@ import (
 	"time"
 
 	"loris-tunnel/internal/forward"
+	"loris-tunnel/internal/model"
 )
 
 const (
 	readyTimeout   = 45 * time.Second
-	retryWindow    = 2 * time.Hour
-	initialBackoff = 2 * time.Second
-	maxBackoff     = 60 * time.Second
+	initialBackoff = time.Second
 )
 
 type ServiceTarget struct {
@@ -52,6 +53,10 @@ type Host struct {
 	events       chan forward.RuntimeEvent
 	readyTimeout time.Duration
 	retryDelay   time.Duration
+	stableWindow time.Duration
+	jitter       func(time.Duration) time.Duration
+	readyAt      time.Time
+	recoveryAt   time.Time
 }
 
 func (c *Client) NewHost(tunnelID, targetHost string, targetPort int) *Host {
@@ -65,6 +70,8 @@ func (c *Client) NewHost(tunnelID, targetHost string, targetPort int) *Host {
 		events:       make(chan forward.RuntimeEvent, 16),
 		readyTimeout: readyTimeout,
 		retryDelay:   initialBackoff,
+		stableWindow: time.Minute,
+		jitter:       func(d time.Duration) time.Duration { return time.Duration(float64(d) * (0.8 + rand.Float64()*0.4)) },
 	}
 }
 
@@ -186,28 +193,58 @@ func (h *Host) supervise(ctx context.Context) {
 		}
 		defer closeBridge()
 	}
-	var deadline time.Time
-	delay := h.retryDelay
+	failures := 0
+	var lastDiagnostic, lastLog time.Time
+	var hostIDs []string
 	connectedBefore := false
 	hostConfigured := false
 	for {
 		var ready atomic.Bool
+		var attemptErr error
 		if hostConfigured {
 			detail := h.client.GetResource(ctx, h.tunnelID)
-			if detail.State != ResourceReady || !configuredPortsAreActive(detail.Resource, h.targets) {
-				h.setErr(fmt.Errorf("cannot safely host existing tunnel: configured ports do not match active services"))
+			if detail.State != ResourceReady {
+				attemptErr = fmt.Errorf("cannot inspect existing tunnel ports (%s): %s", detail.State, hostDiagnosticText(detail.Detail))
+				if !connectedBefore || detail.State != ResourceNetwork {
+					h.setErr(attemptErr)
+					return
+				}
+			}
+			if attemptErr == nil && !configuredPortsAreActive(detail.Resource, h.targets) {
+				var configured, active, extra []int
+				wanted := map[int]bool{}
+				for _, target := range h.targets {
+					active = append(active, target.Port)
+					wanted[target.Port] = true
+				}
+				for _, port := range detail.Resource.Ports {
+					configured = append(configured, port.Number)
+					if !wanted[port.Number] {
+						extra = append(extra, port.Number)
+					}
+				}
+				h.setErr(fmt.Errorf("cannot safely host existing tunnel: configured ports do not match active services (remote=%v, active=%v, extra=%v, portsKnown=%t)", configured, active, extra, detail.Resource.PortsKnown))
 				return
 			}
 		}
-		err := h.runOnce(ctx, &ready, owner, hostConfigured)
+		err := attemptErr
+		if err == nil {
+			err = h.runOnce(ctx, &ready, owner, hostConfigured)
+		}
 		if !hostConfigured && !ready.Load() && err != nil && strings.Contains(err.Error(), "Batch update of ports is not supported") {
 			hostConfigured = true
 			continue
 		}
+
 		if ready.Load() {
 			connectedBefore = true
-			deadline = time.Now().Add(retryWindow)
-			delay = h.retryDelay
+			h.mu.Lock()
+			stable := time.Since(h.readyAt) >= h.stableWindow
+			h.mu.Unlock()
+			if stable {
+				failures = 0
+				hostIDs = nil
+			}
 		}
 		h.mu.Lock()
 		h.url = ""
@@ -215,26 +252,42 @@ func (h *Host) supervise(ctx context.Context) {
 		if h.isStopping() || ctx.Err() != nil {
 			return
 		}
-		if !connectedBefore || !retryableHostError(err) || time.Now().After(deadline) {
+		if !connectedBefore || !retryableHostError(err) {
 			h.setErr(err)
 			return
 		}
-		if ready.Load() {
-			h.emitEvent(forward.RuntimeEvent{Type: forward.RuntimeEventDisconnected, Err: err})
+		h.mu.Lock()
+		if h.recoveryAt.IsZero() {
+			h.recoveryAt = time.Now()
 		}
-		timer := time.NewTimer(delay)
+		h.mu.Unlock()
+		failures++
+		delay := h.jitter(reconnectDelay(h.retryDelay, failures))
+		next := time.Now().Add(delay)
+		kind := hostFailureKind(err)
+		if kind == "host_conflict" && (lastDiagnostic.IsZero() || time.Since(lastDiagnostic) >= time.Minute) {
+			lastDiagnostic = time.Now()
+			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			hostIDs = h.client.observedHostIDs(probeCtx, h.tunnelID)
+			cancel()
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		diagnostic := &model.ReconnectInfo{Kind: kind, Attempt: failures, DelaySeconds: delay.Seconds(), HostIDs: append([]string(nil), hostIDs...), Detail: clip(redactSecrets(err.Error()), 300)}
+		h.emitEvent(forward.RuntimeEvent{Type: forward.RuntimeEventDisconnected, Err: err, Reconnect: diagnostic})
+		if failures == 1 || time.Since(lastLog) >= time.Minute {
+			slog.Warn("dev tunnel reconnect scheduled", "tunnel_id", h.tunnelID, "kind", kind, "attempt", failures, "delay", delay, "detail", diagnostic.Detail)
+			lastLog = time.Now()
+		}
+		timer := time.NewTimer(max(time.Until(next), 0))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return
 		case <-timer.C:
 		}
-		if delay < maxBackoff {
-			delay *= 2
-			if delay > maxBackoff {
-				delay = maxBackoff
-			}
-		}
+
 	}
 }
 
@@ -270,6 +323,10 @@ func (h *Host) runOnce(ctx context.Context, ready *atomic.Bool, owner *hostOwner
 		return err
 	}
 	output.Close()
+	h.client.mu.Lock()
+	version := h.client.version
+	h.client.mu.Unlock()
+	slog.Info("dev tunnel host process started", "tunnel_id", h.tunnelID, "pid", cmd.Process.Pid, "cli_version", version)
 	closeProcess, err := containHostProcess(cmd)
 	if err != nil {
 		killProcessTree(cmd)
@@ -293,6 +350,8 @@ func (h *Host) runOnce(ctx context.Context, ready *atomic.Bool, owner *hostOwner
 	readDone := make(chan string, 1)
 	go func() { readDone <- h.readOutput(stdout, ready, attemptReady) }()
 	hostExitError := func(err error) error {
+		// Reap any descendants left behind by an exited CLI before the next attempt.
+		killProcessTree(cmd)
 		var output string
 		select {
 		case output = <-readDone:
@@ -300,12 +359,16 @@ func (h *Host) runOnce(ctx context.Context, ready *atomic.Bool, owner *hostOwner
 			_ = stdout.Close()
 			output = <-readDone
 		}
-		output = strings.TrimSpace(output)
+		kind := hostFailureKind(errors.New(output))
+		output = strings.TrimSpace(hostDiagnosticText(output))
+		if kind == "auth" {
+			output = "dev tunnel login expired: " + output
+		}
 		if err == nil {
 			err = errors.New("dev tunnel host exited")
 		}
 		if output != "" {
-			return fmt.Errorf("%w: %s", err, output)
+			return &hostAttemptError{kind: kind, err: fmt.Errorf("%w: %s", err, output)}
 		}
 		return err
 	}
@@ -342,6 +405,7 @@ func (h *Host) runOnce(ctx context.Context, ready *atomic.Bool, owner *hostOwner
 
 func (h *Host) readOutput(stdout io.Reader, ready *atomic.Bool, attemptReady chan<- struct{}) string {
 	var output, currentURL string
+	var attemptReason string
 	var currentURLs []string
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
@@ -352,13 +416,17 @@ func (h *Host) readOutput(stdout io.Reader, ready *atomic.Bool, attemptReady cha
 			output = output[len(output)-1000:]
 		}
 		url, isReady, auth := ParseHostLine(line)
-		if auth {
-			h.setErr(errors.New("dev tunnel login expired"))
+		if auth || hostDisconnectLine(line) {
+			if auth {
+				attemptReason = "dev tunnel login expired"
+			} else {
+				attemptReason = "dev tunnel host disconnected: TooManyConnections"
+			}
 			h.mu.Lock()
 			cmd := h.cmd
 			h.mu.Unlock()
 			killProcessTree(cmd)
-			return output
+			return attemptReason + "\n" + output
 		}
 		if strings.HasPrefix(url, "https://") {
 			currentURLs = mergeURLs(currentURLs, ParseHostURLs(line))
@@ -367,23 +435,27 @@ func (h *Host) readOutput(stdout io.Reader, ready *atomic.Bool, attemptReady cha
 		if isReady && currentURL != "" && ready.CompareAndSwap(false, true) {
 			h.mu.Lock()
 			h.url = currentURL
+			h.readyAt = time.Now()
+			recoveryAt := h.recoveryAt
+			h.recoveryAt = time.Time{}
 			h.mu.Unlock()
 			first := false
 			h.readyOnce.Do(func() { first = true; close(h.ready) })
 			if !first {
-				h.emitEvent(forward.RuntimeEvent{Type: forward.RuntimeEventReconnected})
+				slog.Info("dev tunnel host recovered", "tunnel_id", h.tunnelID, "elapsed", time.Since(recoveryAt))
+				h.emitEvent(forward.RuntimeEvent{Type: forward.RuntimeEventReconnected, PublicURL: currentURL})
 			}
 			attemptReady <- struct{}{}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		h.setErr(fmt.Errorf("read CLI output: %w", err))
+		attemptReason = fmt.Sprintf("read CLI output: %v", err)
 		h.mu.Lock()
 		cmd := h.cmd
 		h.mu.Unlock()
 		killProcessTree(cmd)
 	}
-	return output
+	return attemptReason + "\n" + output
 }
 
 func (h *Host) finish() {
@@ -408,30 +480,55 @@ func (h *Host) isStopping() bool {
 }
 
 func retryableHostError(err error) bool {
+	return err != nil && hostFailureKind(err) != "fatal" && hostFailureKind(err) != "auth"
+}
+
+// Only explicit host/relay disconnection diagnostics trigger termination of a live CLI.
+func hostDisconnectLine(line string) bool {
+	text := strings.ToLower(line)
+	return (strings.Contains(text, "toomanyconnections") || strings.Contains(text, "too many connections")) &&
+		(strings.Contains(text, "disconnect") || strings.Contains(text, "relay") || strings.Contains(text, "ssh"))
+}
+
+func hostFailureKind(err error) string {
 	if err == nil {
-		return false
+		return "fatal"
 	}
-	text := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(text, "contain cli process"),
-		strings.Contains(text, "record cli process"),
-		strings.Contains(text, "read cli output"),
-		strings.Contains(text, "access is denied"),
-		strings.Contains(text, "already connected"),
-		strings.Contains(text, "already hosted"),
-		strings.Contains(text, "conflict"),
-		strings.Contains(text, "login"),
-		strings.Contains(text, "auth"),
-		strings.Contains(text, "not signed"),
-		strings.Contains(text, "expired"),
-		strings.Contains(text, "not found"),
-		strings.Contains(text, "invalid"),
-		strings.Contains(text, "not installed"),
-		strings.Contains(text, "permission"):
-		return false
-	default:
-		return true
+	var attempt *hostAttemptError
+	if errors.As(err, &attempt) {
+		return attempt.kind
 	}
+	var diagnosticLines []string
+	for _, line := range strings.Split(err.Error(), "\n") {
+		// Successful readiness output can contain user-chosen IDs such as
+		// "conflict" or "invalid"; those names are not failure diagnostics.
+		if strings.Contains(line, "Connect via browser:") || strings.Contains(line, "Ready to accept connections for tunnel:") {
+			continue
+		}
+		diagnosticLines = append(diagnosticLines, line)
+	}
+	text := strings.ToLower(strings.Join(diagnosticLines, "\n"))
+	if strings.Contains(text, "toomanyconnections") || strings.Contains(text, "too many connections") {
+		return "host_conflict"
+	}
+	for _, word := range []string{"login expired", "login token expired", "login required", "not logged in", "not signed", "authentication is required", "unauthorized", "token expired"} {
+		if strings.Contains(text, word) {
+			return "auth"
+		}
+	}
+	for _, word := range []string{"contain cli process", "record cli process", "read cli output", "access is denied", "access denied", "already connected", "already hosted", "conflict", "not found", "invalid dev tunnel", "invalid tunnel", "invalid argument", "invalid configuration", "not installed", "permission", "forbidden"} {
+		if strings.Contains(text, word) {
+			return "fatal"
+		}
+	}
+	return "transient"
+}
+
+func reconnectDelay(base time.Duration, failures int) time.Duration {
+	// Scale from the production one-second base, allowing fast lifecycle tests.
+	factors := [...]int{1, 2, 4, 8, 15, 30}
+	i := min(max(failures-1, 0), len(factors)-1)
+	return base * time.Duration(factors[i])
 }
 
 // Hosting an existing ID exposes all configured ports, so never include paused services.

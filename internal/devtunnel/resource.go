@@ -56,10 +56,12 @@ type ResourceDetail struct {
 
 // CreateResourceInput creates a persistent tunnel immediately, without a port.
 // Region is a cluster id. Empty means Microsoft chooses the cluster.
+// TunnelName is an optional custom tunnel id; empty means a random id.
 type CreateResourceInput struct {
 	Access     string `json:"access"`
 	Expiration string `json:"expiration"`
 	Region     string `json:"region"`
+	TunnelName string `json:"tunnelName,omitempty"`
 }
 
 // DeleteResourceResult reports whether the remote tunnel was removed.
@@ -180,14 +182,11 @@ func (c *Client) readAccess(ctx context.Context, path, id string) string {
 	}
 	var entries []any
 	if json.Unmarshal([]byte(out), &entries) == nil {
-		return accessFrom(map[string]any{"accessControl": map[string]any{"entries": entries}})
+		return accessFrom(map[string]any{"accessControlEntries": entries})
 	}
 	var object map[string]any
 	if json.Unmarshal([]byte(out), &object) != nil {
 		return "unknown"
-	}
-	if _, ok := object["entries"].([]any); ok {
-		return accessFrom(map[string]any{"accessControl": object})
 	}
 	return accessFrom(object)
 }
@@ -246,8 +245,11 @@ func (c *Client) CreateResource(ctx context.Context, input CreateResourceInput) 
 	if access != "private" && access != "public" {
 		return ResourceDetail{State: ResourceError, Detail: "unsupported dev tunnel access"}
 	}
-	id, err := c.CreatePersistent(ctx, access == "public", input.Expiration, input.Region)
+	id, err := c.CreatePersistent(ctx, access == "public", input.Expiration, input.Region, input.TunnelName)
 	if err != nil {
+		if errors.Is(err, ErrTunnelNameConflict) {
+			return ResourceDetail{State: ResourceError, Detail: ErrTunnelNameConflict.Error()}
+		}
 		state, detail := classifyCLIFailure(err.Error(), err)
 		if state == "" {
 			state = ResourceError
@@ -485,19 +487,33 @@ func accessFrom(object map[string]any) string {
 		}
 		return "private"
 	}
-	control, ok := object["accessControl"].(map[string]any)
+	entries, ok := firstArray(object, "accessControlEntries", "accessControl", "entries")
+	if !ok {
+		if control, nested := object["accessControl"].(map[string]any); nested {
+			entries, ok = firstArray(control, "entries")
+		}
+	}
 	if !ok {
 		return "unknown"
 	}
-	entries, _ := control["entries"].([]any)
 	for _, entry := range entries {
 		item, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
 		kind := strings.ToLower(firstString(item, "type", "kind"))
-		if strings.Contains(kind, "anonymous") {
+		if !strings.Contains(kind, "anonymous") {
+			continue
+		}
+		// Older CLI responses omit scopes; explicit scopes must include connect.
+		scopes, scoped := item["scopes"].([]any)
+		if !scoped {
 			return "public"
+		}
+		for _, scope := range scopes {
+			if value, ok := scope.(string); ok && strings.EqualFold(value, "connect") {
+				return "public"
+			}
 		}
 	}
 	return "private"

@@ -7,6 +7,9 @@ import { createServer } from 'vite'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const output = fileURLToPath(new URL('../../screenshots/', import.meta.url))
+const locale = process.argv.find(arg => arg.startsWith('--locale='))?.split('=')[1] || 'en'
+assert.ok(['en', 'zh-CN'].includes(locale), 'Supported screenshot locales: en, zh-CN')
+const messages = JSON.parse(await readFile(new URL(`../src/locales/${locale}.json`, import.meta.url), 'utf8'))
 const shots = [
   { name: 'overview', title: 'Overview' },
   ...['ssh', 'devtunnel', 'cloudflare', 'frp'].map(provider => ({ name: 'providers', title: 'Providers', provider })),
@@ -15,6 +18,7 @@ const shots = [
   { name: 'logs', title: 'Logs' },
   { name: 'config', title: 'Config' },
   { name: 'config', title: 'Config', bottom: true },
+  ...(locale === 'zh-CN' ? [{ name: 'overview', title: 'Overview', accent: 'green' }] : []),
 ]
 // Follow the desktop window dimensions instead of maintaining a second size.
 const main = await readFile(new URL('../../main.go', import.meta.url), 'utf8')
@@ -30,7 +34,7 @@ try {
   const address = server.httpServer.address()
   const origin = `http://127.0.0.1:${address.port}`
   browser = await chromium.launch({ headless: true, ...(process.env.SCREENSHOT_CHROME_PATH ? { executablePath: process.env.SCREENSHOT_CHROME_PATH } : {}) })
-  const context = await browser.newContext({ viewport, deviceScaleFactor: 2, colorScheme: 'light', locale: 'en-US', timezoneId: 'UTC' })
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 2, colorScheme: 'light', locale: locale === 'en' ? 'en-US' : locale, timezoneId: 'UTC' })
   // The preview must work offline and must never contact real services.
   await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort())
   const page = await context.newPage()
@@ -38,18 +42,20 @@ try {
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
   await mkdir(output, { recursive: true })
-  for (const { name, title, provider, bottom } of shots) {
-    const query = new URLSearchParams({ page: name, ...(provider ? { provider } : {}) })
+  for (const { name, title, provider, bottom, accent } of shots) {
+    const query = new URLSearchParams({ page: name, locale, ...(provider ? { provider } : {}) })
     await page.goto(`${origin}/screenshots/index.html?${query}`, { waitUntil: 'networkidle' })
     await page.locator('html[data-screenshot-ready="true"]').waitFor()
     await page.evaluate(() => document.fonts.ready)
+    if (accent) await page.evaluate(value => { document.documentElement.dataset.accent = value }, accent)
     await page.addStyleTag({ content: '*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }' })
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'light')
     assert.equal(await page.locator('[data-screenshot-preview]').count(), 1)
     assert.match(await page.locator('.sidebar-pro-expiry').innerText(), /Pro/, 'Screenshot must display Pro status')
     assert.doesNotMatch(await page.locator('.sidebar-version').innerText(), /-dev/, 'Screenshot must display the release version')
     assert.equal(await page.locator('.sidebar-traffic').count(), name === 'overview' ? 1 : 0, 'Only Overview should display traffic')
-    assert.equal(await page.locator('.page-title').textContent(), title)
+    assert.equal(await page.locator('html').getAttribute('lang'), locale)
+    assert.equal(await page.locator('.page-title').textContent(), messages.app.sidebar[name])
     const reads = await page.evaluate(() => window.__screenshotFixtureCalls)
     assert.ok(Array.isArray(reads), 'Preview must use the standalone fixture bridge')
     assert.ok(reads.every(method => ['GetFRPStatus', 'GetCloudSyncStatus', 'GetAutoRunEnabled', 'GetTrafficMonitorEnabled', 'GetConfigLocationInfo'].includes(method)), 'Screenshot must only read fixture data')
@@ -62,7 +68,7 @@ try {
       assert.ok(text.includes('8080') && text.includes('3000') && text.includes('asse'), 'Dev Tunnel sample ports and regions must render')
       assert.ok(!text.includes('Not fetched'), 'Dev Tunnel fixtures must contain fetched port data')
     }
-    if (name === 'sync') await page.locator('.sync-status').getByText('Synced', { exact: true }).waitFor()
+    if (name === 'sync') await page.locator('.sync-status').getByText(locale === 'en' ? 'Synced' : '已同步', { exact: true }).waitFor()
     if (name === 'config') await page.locator('.config-path').waitFor({ state: 'attached' })
     if (bottom) await page.locator('main').evaluate(el => { el.scrollTop = el.scrollHeight })
     if (name === 'tunnels') {
@@ -78,7 +84,7 @@ try {
     }))
     assert.ok(contentVisible, `${name}: table content must fit in the desktop viewport`)
     assert.deepEqual(errors, [], 'Preview must render without errors')
-    const destination = path.join(output, `screenshot-v2-${name}${provider ? `-${provider}` : ''}${bottom ? '-license' : ''}-light.png`)
+    const destination = path.join(output, `screenshot-v2-${locale === 'zh-CN' ? 'cn-' : ''}${name}${provider ? `-${provider}` : ''}${bottom ? '-license' : ''}${accent ? `-${accent}` : ''}-light.png`)
     await page.screenshot({ path: destination, animations: 'disabled' })
     console.log(`Saved ${destination}`)
   }

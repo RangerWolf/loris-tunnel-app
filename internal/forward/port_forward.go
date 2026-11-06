@@ -46,8 +46,10 @@ const (
 )
 
 type RuntimeEvent struct {
-	Type RuntimeEventType
-	Err  error
+	Type      RuntimeEventType
+	Err       error
+	PublicURL string
+	Reconnect *model.ReconnectInfo
 }
 
 type LocalForward struct {

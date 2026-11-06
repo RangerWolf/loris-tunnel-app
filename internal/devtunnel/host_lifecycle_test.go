@@ -36,6 +36,17 @@ func TestMain(m *testing.M) {
 				time.Sleep(time.Hour)
 			}
 		}
+		if strings.HasPrefix(mode, "recovery-") && len(os.Args) > 1 && os.Args[1] == "show" {
+			if mode == "recovery-probe-hang" {
+				_ = os.WriteFile(state+".probe", []byte("started"), 0600)
+				time.Sleep(time.Hour)
+			}
+			if mode == "recovery-probe-error" {
+				os.Exit(1)
+			}
+			fmt.Println(`{"endpoints":[{"hostId":"observed-peer"}]}`)
+			os.Exit(0)
+		}
 		data, _ := os.ReadFile(state)
 		attempt, _ := strconv.Atoi(string(data))
 		attempt++
@@ -54,6 +65,10 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, "specific CLI failure")
 			os.Exit(1)
 		}
+		if mode == "recovery-transient" && attempt > 1 && attempt < 4 {
+			fmt.Fprintln(os.Stderr, "relay network timeout")
+			os.Exit(1)
+		}
 		if mode == "reconnect" && attempt == 2 {
 			fmt.Println("Ready to accept connections for tunnel: abc.usw3")
 		} else if mode != "silent" {
@@ -63,6 +78,20 @@ func TestMain(m *testing.M) {
 				fmt.Println("Connect via browser: https://abc-3000.usw3.devtunnels.ms")
 			}
 			fmt.Println("Ready to accept connections for tunnel: abc.usw3")
+		}
+		if strings.HasPrefix(mode, "recovery-") && (attempt == 1 || mode == "recovery-flap") {
+			time.Sleep(70 * time.Millisecond)
+			switch mode {
+			case "recovery-auth":
+				fmt.Fprintln(os.Stderr, "Login token expired")
+			case "recovery-transient":
+				fmt.Fprintln(os.Stderr, "relay network timeout")
+			default:
+				fmt.Fprintln(os.Stderr, "SSH host disconnected: TooManyConnections conflict")
+			}
+			if mode != "recovery-live" {
+				os.Exit(1)
+			}
 		}
 		if mode == "reconnect" && attempt == 1 {
 			time.Sleep(50 * time.Millisecond)
@@ -83,6 +112,7 @@ func lifecycleClient(t *testing.T, mode string) (*Client, string) {
 	}
 	state := filepath.Join(t.TempDir(), "attempts")
 	t.Setenv("LORIS_TEST_CLI", mode)
+	t.Setenv("GORACE", os.Getenv("GORACE")+" atexit_sleep_ms=0")
 	t.Setenv("LORIS_TEST_CLI_STATE", state)
 	client := NewClient(path)
 	client.hostDir = t.TempDir()
@@ -177,7 +207,7 @@ func TestHostReconnectRequiresFreshReadinessAndHasTimeout(t *testing.T) {
 	defer host.Stop()
 	awaitCondition(t, func() bool { data, _ := os.ReadFile(state); return string(data) == "3" })
 	awaitCondition(t, func() bool { return host.URL() != "" })
-	for _, expected := range []forward.RuntimeEventType{forward.RuntimeEventDisconnected, forward.RuntimeEventReconnected} {
+	for _, expected := range []forward.RuntimeEventType{forward.RuntimeEventDisconnected, forward.RuntimeEventDisconnected, forward.RuntimeEventReconnected} {
 		select {
 		case event := <-host.Events():
 			if event.Type != expected {
